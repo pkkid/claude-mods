@@ -4,7 +4,7 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [Settings]
+5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [...]
 ```
 
 | Segment | Meaning |
@@ -23,7 +23,7 @@ session the bar shows the figures from your previous session.
 
 ## Settings
 
-Press **Settings** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
+Press **...** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
 tokens, cache warmth, thread cost, last-turn cost, monthly cost, burn-rate projection, threshold colors, threshold alerts, Handoff
 button. Choices are saved across sessions. Press **Done** to close it.
 
@@ -32,7 +32,7 @@ Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%
 ## Handoff
 
 `/handoff` asks the current conversation for a brief (goal, current state, decisions, open tasks, key
-files, next step), prints it in the chat as a markdown code block, and copies the raw markdown to the clipboard. Paste it into a new session to
+files, next step), prints it in the chat as a highlighted markdown code block, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
 The **Handoff** button puts `/handoff` in the prompt box for you to send with Enter: a mod cannot answer a command it

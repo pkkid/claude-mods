@@ -11,3 +11,13 @@ export function handoffOutput(brief: string): string {
 
   return `Handoff brief\n\n${fence}markdown\n${brief}\n${fence}`
 }
+
+/** Code elements hold at most this many characters; a longer brief keeps the engine's own fenced row. */
+export const MAX_CODE_CHARS = 10_000
+
+/** The brief inside a row `handoffOutput` built (the plugin-name prefix allowed), or null for any other text. */
+export function parseHandoffOutput(text: string): string | null {
+  const match = /Handoff brief\n\n(`{3,})markdown\n([\s\S]*)\n\1\s*$/.exec(text)
+
+  return match?.[2] ?? null
+}
