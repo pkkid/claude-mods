@@ -26,6 +26,7 @@ async function start($: Engine, on: On, costs: { usd: number }) {
   mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('session.id', () => ({ value: 'session-1' }))
   on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [], cost: { usd: costs.usd } } }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
@@ -106,5 +107,32 @@ describe('wiring', () => {
     await $.turn.complete(complete('t1'))
     await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
     expect(await barText($)).toContain('thread $3.00 (+$2.00)')
+  })
+
+  test('/handoff prints the brief to the chat and copies it, writing no file', async ($, on) => {
+    const brief = '## Goal\nShip aicost\n\n## Next step\nMerge'
+    const writes: string[] = []
+    const copies: string[] = []
+    on('model.fork', () => ({
+      value: { isAnswered: true, text: brief, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } },
+    }))
+    on('fs.write', (_, e) => {
+      writes.push(e.path)
+      return { value: undefined }
+    })
+    on('ui.copy', (_, e) => {
+      copies.push(e.text)
+      return { value: { isCopied: true as const } }
+    })
+    await start($, on, { usd: 0 })
+    const result = await $.command.run({
+      command: 'handoff',
+      args: '',
+      origin: { kind: 'composer' },
+      presentation: { isFullscreen: false, columns: 100 },
+    })
+    expect(result.text).toBe(brief)
+    expect(copies).toEqual([brief])
+    expect(writes).toEqual([])
   })
 })

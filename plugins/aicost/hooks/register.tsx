@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderSurface } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { EMPTY_ALERTS, checkAlerts } from '../src/alerts'
 import type { AlertState } from '../src/alerts'
 import { renderBar, renderSettings } from '../src/bar'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
-import { HANDOFF_PROMPT, handoffPath } from '../src/handoff'
+import { HANDOFF_PROMPT } from '../src/handoff'
 import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionUsd } from '../src/transcripts'
@@ -125,30 +125,28 @@ function startScan($: EngineInterface): void {
   $.clock.after(0, () => void scan($))
 }
 
-async function writeHandoff($: EngineInterface, surface?: RenderSurface): Promise<string> {
-  const reply = await $.model.fork({ prompt: HANDOFF_PROMPT })
-  if (!reply.isAnswered) {
-    return `Handoff failed: ${reply.reason === 'nothing-to-fork' ? 'nothing to hand off yet' : reply.reason}`
-  }
-  const cwd = await $.session.cwd()
-  const now = await $.clock.now()
-  const minutePath = handoffPath(cwd, now)
-  const path = (await $.fs.exists(minutePath)) ? handoffPath(cwd, now, true) : minutePath
-  await $.fs.write(path, `${reply.text.trim()}\n`)
-  const copied = await $.ui.copy({ text: reply.text, surface })
-
-  return `Handoff saved to ${path.slice(cwd.length + 1)} (${copied.isCopied ? 'copied' : 'copy failed'})`
-}
-
-async function handoff($: EngineInterface, surface?: RenderSurface): Promise<string> {
+/** Asks a fork of this conversation for the brief; copies it and toasts the outcome. Returns the chat row's text. */
+async function handoff($: EngineInterface): Promise<string> {
   if (await read($, isHandingOff)) {
     return 'Handoff already in progress.'
   }
   await update($, isHandingOff, () => true)
   try {
-    return await writeHandoff($, surface)
+    const reply = await $.model.fork({ prompt: HANDOFF_PROMPT })
+    if (!reply.isAnswered) {
+      const text = `Handoff failed: ${reply.reason === 'nothing-to-fork' ? 'nothing to hand off yet' : reply.reason}`
+      $.ui.toast(text)
+      return text
+    }
+    const brief = reply.text.trim()
+    const copied = await $.ui.copy({ text: brief })
+    $.ui.toast(copied.isCopied ? 'Handoff brief copied to the clipboard' : 'Handoff brief ready (copy failed)')
+
+    return brief
   } catch (err) {
-    return `Handoff failed: ${errorText(err)}`
+    const text = `Handoff failed: ${errorText(err)}`
+    $.ui.toast(text)
+    return text
   } finally {
     await update($, isHandingOff, () => false)
   }
@@ -214,7 +212,7 @@ export const register: Register = on => {
     }
     await restoreCacheAt($)
     $.clock.every(TICK_MS, () => void update($, tick, n => (n ?? 0) + 1))
-    await $.command.register({ name: 'handoff', description: 'Write a handoff brief for a fresh session and copy it' })
+    await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
 
     return next(e)
@@ -263,12 +261,8 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'handoff' }, async $ => {
-    const text = await handoff($)
-    $.ui.toast(text)
-
-    return { text }
-  })
+  // The brief is the command's output row: the chat renders it as markdown.
+  on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) {
@@ -296,7 +290,7 @@ export const register: Register = on => {
     const flags = { isWorking: e.props.isWorking, isHandingOff: await read($, isHandingOff) }
 
     return renderBar(el, view, flags, {
-      handoff: () => void handoff($, e.surface).then(text => $.ui.toast(text)),
+      handoff: () => void $.command.run({ command: 'handoff' }).catch(err => $.ui.toast(`Handoff failed: ${errorText(err)}`)),
       openSettings: () => void update($, isSettingsOpen, () => true),
     })
   })

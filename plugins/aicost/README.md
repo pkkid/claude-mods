@@ -32,8 +32,8 @@ Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%
 ## Handoff
 
 **Handoff** (or `/handoff`) asks the current conversation for a brief (goal, current state, decisions, open tasks, key
-files, next step), saves it to `.claude/handoffs/YYYY-MM-DD-HHMM.md` in the project, and copies it to the clipboard.
-Paste it into a new session to continue there.
+files, next step), prints it in the chat as markdown, and copies it to the clipboard. Paste it into a new session to
+continue there. The brief is a command output row, so the current session's model reads it too.
 
 ## How monthly cost is computed
 
