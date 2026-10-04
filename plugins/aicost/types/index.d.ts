@@ -1,4 +1,5 @@
 export type ToggleKey =
+  | 'label'
   | 'fiveHour'
   | 'weekly'
   | 'resets'

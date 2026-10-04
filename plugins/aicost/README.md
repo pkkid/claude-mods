@@ -4,11 +4,12 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [...]
+AI Cost    5h 42% ·1h12m    wk 18% ·Thu    ctx 31% 62k/200k    cache 42m    thread $3.12 (+$0.41)    month $184.20    limit ~3:40pm   [Handoff] [...]
 ```
 
 | Segment | Meaning |
 |---|---|
+| `AI Cost` | A dim label naming the bar |
 | `5h 42% ·1h12m` | 5-hour usage window: percent used, time until it resets |
 | `wk 18% ·Thu` | Weekly window: percent used, the day it resets (hours when under a day) |
 | `ctx 31% 62k/200k` | Context window fill: percent and tokens used / window size |
@@ -28,7 +29,7 @@ sessions. `/handoff` works either way.
 
 ## Settings
 
-Press **...** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
+Press **...** to open the checklist and toggle any of: the AI Cost label, 5-hour usage, weekly usage, reset countdowns, context %, context
 tokens, cache warmth, thread cost, last-turn cost, monthly cost, burn-rate projection, threshold colors, threshold alerts, Handoff
 button. Choices are saved across sessions. Press **Done** to close it.
 

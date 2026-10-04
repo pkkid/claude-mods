@@ -20,10 +20,16 @@ function band() {
   }
 }
 
+/** Answers the band as core does when no plugin beneath draws it: its own drawing, by ref. */
+function coreBand(on: On) {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine' as const, ref: 0 }))
+}
+
 /** Starts a session whose `$.session.usage()` reports `cost.usd` as `costs.usd`. */
 async function start($: Engine, on: On, costs: { usd: number }, stored: Record<string, unknown> = {}) {
   mock.store(on, { lastSnapshot: PREVIOUS, ...stored })
   mock.clock(on, { now: NOW })
+  coreBand(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.id', () => ({ value: 'session-1' }))
@@ -192,6 +198,15 @@ describe('wiring', () => {
   test('/aicost with an unknown argument explains usage', async ($, on) => {
     await start($, on, { usd: 0 })
     expect((await runAicost($, 'bogus')).text).toBe('Usage: /aicost [on|off] (no argument toggles the bar)')
+  })
+
+  test('the bar stacks above a band a plugin beneath drew', async ($, on) => {
+    engineBand(on)
+    await start($, on, { usd: 0 })
+    const ui = await $.ui.mount(band())
+    expect(await ui.find({ key: 'settings' })).toBeDefined()
+    expect(await ui.find({ text: 'engine band' })).toBeDefined()
+    await ui.unmount()
   })
 
   test('a hidden bar stays hidden in a new session', async ($, on) => {

@@ -18,7 +18,9 @@ export type Tone = 'warn' | 'danger' | undefined
 
 export type Segment = { key: string; text: string; tone?: Tone }
 
-export const SEPARATOR = ' │ '
+export const SEPARATOR = '    '
+/** Names the mod at the start of the bar; the `label` toggle hides it. */
+export const LABEL = 'AI Cost'
 
 /** Claude Code writes the main conversation's prompt cache with the 1-hour TTL; each request restarts it. */
 export const CACHE_TTL = 60 * 60_000
@@ -106,6 +108,9 @@ export function segments(view: View): Segment[] {
 
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
+/** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
+const QUIET = { plain: true, dimColor: true } as const
+
 export function renderBar(
   el: El,
   view: View,
@@ -120,6 +125,12 @@ export function renderBar(
   return (
     <Box flexDirection="row" justifyContent="space-between">
       <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>
+        {view.settings.label && (
+          <Text key="label" dimColor>
+            {LABEL}
+            {segs.length > 0 ? SEPARATOR : ''}
+          </Text>
+        )}
         {segs.map((s, i) => (
           <Text key={s.key} color={s.tone ? TONE_COLORS[s.tone] : undefined} dimColor={!s.tone}>
             {s.text}
@@ -127,16 +138,16 @@ export function renderBar(
           </Text>
         ))}
       </Box>
-      <Box flexDirection="row" gap={1} flexShrink={0}>
+      <Box flexDirection="row" gap={0} flexShrink={0}>
         {view.settings.handoffButton && (
           <Button
             key="handoff"
             label={flags.isHandingOff ? 'Handoff…' : 'Handoff'}
-            dimColor={!isHandoffIdle}
+            {...QUIET}
             onPress={() => isHandoffIdle && on.handoff()}
           />
         )}
-        <Button key="settings" label="..." onPress={() => on.openSettings()} />
+        <Button key="settings" label="..." {...QUIET} onPress={() => on.openSettings()} />
       </Box>
     </Box>
   )
@@ -150,11 +161,11 @@ export function renderSettings(el: El, settings: Settings, on: { toggle(key: Tog
       <Text bold>aicost settings</Text>
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
         {TOGGLES.map(t => (
-          <Button key={t.key} label={`[${settings[t.key] ? '✓' : ' '}] ${t.label}`} plain onPress={() => on.toggle(t.key)} />
+          <Button key={t.key} label={`[${settings[t.key] ? '✓' : ' '}] ${t.label}`} {...QUIET} onPress={() => on.toggle(t.key)} />
         ))}
       </Box>
       <Box flexDirection="row" justifyContent="flex-end">
-        <Button key="done" label="Done" variant="primary" onPress={() => on.close()} />
+        <Button key="done" label="Done" {...QUIET} onPress={() => on.close()} />
       </Box>
     </Box>
   )

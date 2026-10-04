@@ -169,6 +169,36 @@ async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTI
   await saveSettings(storeOf($), normalizeSettings(changed))
 }
 
+/** The bar, or its settings while they are open, for the AbovePrompt band. */
+async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], isWorking: boolean) {
+  await read($, tick)
+  const current = normalizeSettings(await read($, settings))
+
+  if (await read($, isSettingsOpen)) {
+    return renderSettings(el, current, {
+      toggle: key => void toggleSetting($, key),
+      close: () => void update($, isSettingsOpen, () => false),
+    })
+  }
+
+  const view = {
+    snapshot: await read($, snapshot),
+    month: await read($, month),
+    projection: await read($, projection),
+    cacheAt: await read($, cacheAt),
+    settings: current,
+    now: await $.clock.now(),
+  }
+  const flags = { isWorking, isHandingOff: await read($, isHandingOff) }
+
+  return renderBar(el, view, flags, {
+    // A plugin can't answer a command it runs itself (the engine skips the caller's hooks),
+    // so the button stages /handoff in the prompt box for the person to send.
+    handoff: () => void fillHandoff($),
+    openSettings: () => void update($, isSettingsOpen, () => true),
+  })
+}
+
 async function measure($: EngineInterface, e: { rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]; context: Snapshot['context'] & {}; cost?: { usd: number } }) {
   const previous = await read($, snapshot)
   const cache = e.cost ? null : await readCache($)
@@ -286,36 +316,22 @@ export const register: Register = on => {
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
 
+  // The band holds one tree, so the bar stacks above whatever the plugins beneath drew
+  // rather than ending the chain; core's own drawing beneath is left out.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, isHidden))) {
       return next(e)
     }
-    await read($, tick)
+    const below = await next(e)
     const el = $.ui.resolve(e)
-    const current = normalizeSettings(await read($, settings))
-
-    if (await read($, isSettingsOpen)) {
-      return renderSettings(el, current, {
-        toggle: key => void toggleSetting($, key),
-        close: () => void update($, isSettingsOpen, () => false),
-      })
-    }
-
-    const view = {
-      snapshot: await read($, snapshot),
-      month: await read($, month),
-      projection: await read($, projection),
-      cacheAt: await read($, cacheAt),
-      settings: current,
-      now: await $.clock.now(),
-    }
-    const flags = { isWorking: e.props.isWorking, isHandingOff: await read($, isHandingOff) }
-
-    return renderBar(el, view, flags, {
-      // A plugin can't answer a command it runs itself (the engine skips the caller's hooks),
-      // so the button stages /handoff in the prompt box for the person to send.
-      handoff: () => void fillHandoff($),
-      openSettings: () => void update($, isSettingsOpen, () => true),
-    })
+    const bar = await drawBar($, el, e.props.isWorking)
+    if (below.type === 'engine') return bar
+    const { Box } = el
+    return (
+      <Box flexDirection="column" width="100%" gap={1}>
+        {bar}
+        {below}
+      </Box>
+    )
   })
 }

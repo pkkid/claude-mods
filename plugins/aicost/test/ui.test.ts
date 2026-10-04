@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
@@ -19,8 +20,14 @@ function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean; b
   }
 }
 
+/** Answers the band as core does when no plugin beneath draws it: its own drawing, by ref. */
+function coreBand(on: On) {
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'engine' as const, ref: 0 }))
+}
+
 describe('AbovePrompt band', () => {
   test('settings open, toggle and close', async ($, on) => {
+    coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
     for (const surface of SURFACES) {
@@ -49,7 +56,28 @@ describe('AbovePrompt band', () => {
     }
   })
 
+  test('the AI Cost label shows by default', async ($, on) => {
+    coreBand(on)
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    const ui = await $.ui.mount(band('desktop'))
+    expect(await ui.find({ text: 'AI Cost    ' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the AI Cost label follows its toggle', async ($, on) => {
+    coreBand(on)
+    mock.store(on, { settings: { label: false } })
+    mock.clock(on, { now: NOW })
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount(band('desktop'))
+    expect(await ui.find({ text: 'AI Cost    ' })).toBeUndefined()
+    await ui.unmount()
+  })
+
   test('handoff button follows its toggle', async ($, on) => {
+    coreBand(on)
     mock.store(on, { settings: { handoffButton: false } })
     mock.clock(on, { now: NOW })
     on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -76,6 +104,7 @@ describe('AbovePrompt band', () => {
   })
 
   test('a narrow bar wraps instead of dropping segments', async ($, on) => {
+    coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
     for (const surface of SURFACES) {

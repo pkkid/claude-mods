@@ -4,6 +4,7 @@ import type { Settings, ToggleKey } from '../types'
 export type KeyStore = { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> }
 
 export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
+  { key: 'label', label: 'AI Cost label' },
   { key: 'fiveHour', label: '5-hour usage' },
   { key: 'weekly', label: 'Weekly usage' },
   { key: 'resets', label: 'Reset countdowns' },
