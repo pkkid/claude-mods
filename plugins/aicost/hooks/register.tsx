@@ -6,7 +6,7 @@ import type { AlertState } from '../src/alerts'
 import { renderBar, renderSettings } from '../src/bar'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
-import { HANDOFF_PROMPT } from '../src/handoff'
+import { HANDOFF_PROMPT, handoffOutput } from '../src/handoff'
 import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionUsd } from '../src/transcripts'
@@ -142,7 +142,7 @@ async function handoff($: EngineInterface): Promise<string> {
     const copied = await $.ui.copy({ text: brief })
     $.ui.toast(copied.isCopied ? 'Handoff brief copied to the clipboard' : 'Handoff brief ready (copy failed)')
 
-    return brief
+    return handoffOutput(brief)
   } catch (err) {
     const text = `Handoff failed: ${errorText(err)}`
     $.ui.toast(text)

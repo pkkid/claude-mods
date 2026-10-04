@@ -131,7 +131,7 @@ describe('wiring', () => {
       origin: { kind: 'composer' },
       presentation: { isFullscreen: false, columns: 100 },
     })
-    expect(result.text).toBe(brief)
+    expect(result.text).toBe(`Handoff brief\n\n\`\`\`markdown\n${brief}\n\`\`\``)
     expect(copies).toEqual([brief])
     expect(writes).toEqual([])
   })
