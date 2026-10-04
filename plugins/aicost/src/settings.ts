@@ -1,0 +1,42 @@
+import type { Settings, ToggleKey } from '../types'
+
+/** The slice of `$.store` the mod needs; the hooks module passes `$.store` itself. */
+export type KeyStore = { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> }
+
+export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
+  { key: 'fiveHour', label: '5-hour usage' },
+  { key: 'weekly', label: 'Weekly usage' },
+  { key: 'resets', label: 'Reset countdowns' },
+  { key: 'contextPercent', label: 'Context %' },
+  { key: 'contextTokens', label: 'Context tokens' },
+  { key: 'threadCost', label: 'Thread cost' },
+  { key: 'lastTurnCost', label: 'Last-turn cost' },
+  { key: 'monthlyCost', label: 'Monthly cost' },
+  { key: 'burnRate', label: 'Burn-rate projection' },
+  { key: 'thresholdColors', label: 'Threshold colors' },
+  { key: 'thresholdAlerts', label: 'Threshold alerts' },
+  { key: 'handoffButton', label: 'Handoff button' },
+]
+
+export const DEFAULT_SETTINGS: Settings = Object.fromEntries(TOGGLES.map(t => [t.key, true])) as Settings
+
+export function normalizeSettings(raw: unknown): Settings {
+  const given = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const settings = { ...DEFAULT_SETTINGS }
+  for (const { key } of TOGGLES) {
+    const value = given[key]
+    if (typeof value === 'boolean') {
+      settings[key] = value
+    }
+  }
+
+  return settings
+}
+
+export async function loadSettings(store: KeyStore): Promise<Settings> {
+  return normalizeSettings(await store.get('settings'))
+}
+
+export async function saveSettings(store: KeyStore, settings: Settings): Promise<void> {
+  await store.set('settings', settings)
+}
