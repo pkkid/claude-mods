@@ -97,4 +97,14 @@ describe('wiring', () => {
     await step($, 'sub')
     expect(await barText($)).toContain('cache —')
   })
+
+  test('a reload of the same session keeps thread and last-turn cost', async ($, on) => {
+    const costs = { usd: 1 }
+    await start($, on, costs)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    costs.usd = 3
+    await $.turn.complete(complete('t1'))
+    await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
+    expect(await barText($)).toContain('thread $3.00 (+$2.00)')
+  })
 })

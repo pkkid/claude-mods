@@ -16,8 +16,7 @@ export type View = {
 
 export type Tone = 'warn' | 'danger' | undefined
 
-/** Higher priority is kept longer when the bar is too narrow. */
-export type Segment = { key: string; text: string; tone?: Tone; priority: number }
+export type Segment = { key: string; text: string; tone?: Tone }
 
 export const SEPARATOR = ' │ '
 
@@ -39,13 +38,13 @@ export function toneFor(pct: number | undefined, settings: Settings): Tone {
 
 function cacheSegment(cacheAt: number | null, now: number, settings: Settings): Segment {
   if (cacheAt === null) {
-    return { key: 'cache', text: `cache ${DASH}`, priority: 3 }
+    return { key: 'cache', text: `cache ${DASH}` }
   }
   const left = cacheAt + CACHE_TTL - now
   const tone: Tone = !settings.thresholdColors ? undefined : left <= 0 ? 'danger' : left < CACHE_WARN ? 'warn' : undefined
   const text = left <= 0 ? 'cache cold' : `cache ${Math.max(1, Math.ceil(left / MIN))}m`
 
-  return { key: 'cache', text, tone, priority: 3 }
+  return { key: 'cache', text, tone }
 }
 
 function monthText(month: MonthTotal): string {
@@ -66,11 +65,11 @@ export function segments(view: View): Segment[] {
 
   if (on.fiveHour) {
     const reset = on.resets && fiveHour?.resetsAt ? ` ·${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
-    segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on), priority: 8 })
+    segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on) })
   }
   if (on.weekly) {
     const reset = on.resets && weekly?.resetsAt ? ` ·${weeklyReset(weekly.resetsAt, now)}` : ''
-    segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on), priority: 7 })
+    segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on) })
   }
   if (on.contextPercent || on.contextTokens) {
     const parts: string[] = []
@@ -82,7 +81,7 @@ export function segments(view: View): Segment[] {
     } else if (on.contextTokens && !on.contextPercent) {
       parts.push(DASH)
     }
-    segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on), priority: on.contextPercent ? 6 : 5 })
+    segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on) })
   }
   if (on.cacheWarmth) {
     segs.push(cacheSegment(view.cacheAt, now, on))
@@ -91,32 +90,18 @@ export function segments(view: View): Segment[] {
   if (on.threadCost) {
     const thread = snapshot?.threadUsd === undefined ? DASH : usd(snapshot.threadUsd)
     const turn = on.lastTurnCost && last !== undefined ? ` (+${usd(last)})` : ''
-    segs.push({ key: 'thread', text: `thread ${thread}${turn}`, priority: 4 })
+    segs.push({ key: 'thread', text: `thread ${thread}${turn}` })
   } else if (on.lastTurnCost) {
-    segs.push({ key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}`, priority: 4 })
+    segs.push({ key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}` })
   }
   if (on.monthlyCost) {
-    segs.push({ key: 'month', text: monthText(view.month), priority: 2 })
+    segs.push({ key: 'month', text: monthText(view.month) })
   }
   if (on.burnRate && view.projection !== null) {
-    segs.push({ key: 'burn', text: `limit ~${clockTime(view.projection)}`, priority: 1 })
+    segs.push({ key: 'burn', text: `limit ~${clockTime(view.projection)}` })
   }
 
   return segs
-}
-
-function width(segs: Segment[]): number {
-  return segs.reduce((sum, s) => sum + s.text.length, 0) + Math.max(0, segs.length - 1) * SEPARATOR.length
-}
-
-export function fit(segs: Segment[], columns: number, reserved: number): Segment[] {
-  let kept = segs
-  while (kept.length > 0 && width(kept) + reserved > columns) {
-    const lowest = Math.min(...kept.map(s => s.priority))
-    kept = kept.filter(s => s.priority !== lowest)
-  }
-
-  return kept
 }
 
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -124,29 +109,32 @@ type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 export function renderBar(
   el: El,
   view: View,
-  flags: { isWorking: boolean; isHandingOff: boolean; columns: number },
+  flags: { isWorking: boolean; isHandingOff: boolean },
   on: { handoff(): void; openSettings(): void },
 ) {
   const { Box, Text, Button } = el
-  const showHandoff = view.settings.handoffButton
   const isHandoffIdle = !flags.isWorking && !flags.isHandingOff
-  const handoffLabel = flags.isHandingOff ? 'Handoff…' : 'Handoff'
-  const reserved = 2 + (showHandoff ? handoffLabel.length + 5 : 0) + 6
-  const segs = fit(segments(view), flags.columns, reserved)
+  const segs = segments(view)
 
+  // Segments wrap onto further rows when the band is narrow; the buttons keep their place on the right.
   return (
     <Box flexDirection="row" justifyContent="space-between">
-      <Box flexDirection="row" flexShrink={1}>
+      <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>
         {segs.map((s, i) => (
-          <Text key={s.key} color={s.tone ? TONE_COLORS[s.tone] : undefined} dimColor={!s.tone} wrap="truncate">
-            {i > 0 ? SEPARATOR : ''}
+          <Text key={s.key} color={s.tone ? TONE_COLORS[s.tone] : undefined} dimColor={!s.tone}>
             {s.text}
+            {i < segs.length - 1 ? SEPARATOR : ''}
           </Text>
         ))}
       </Box>
-      <Box flexDirection="row" gap={1}>
-        {showHandoff && (
-          <Button key="handoff" label={handoffLabel} dimColor={!isHandoffIdle} onPress={() => isHandoffIdle && on.handoff()} />
+      <Box flexDirection="row" gap={1} flexShrink={0}>
+        {view.settings.handoffButton && (
+          <Button
+            key="handoff"
+            label={flags.isHandingOff ? 'Handoff…' : 'Handoff'}
+            dimColor={!isHandoffIdle}
+            onPress={() => isHandoffIdle && on.handoff()}
+          />
         )}
         <Button key="settings" label="⚙" onPress={() => on.openSettings()} />
       </Box>

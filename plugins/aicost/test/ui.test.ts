@@ -3,7 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
 
-function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean } = {}) {
+function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean; bodyColumns?: number } = {}) {
   return {
     plugin: 'aicost',
     surface,
@@ -12,7 +12,7 @@ function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean } 
       hasSurvey: over.hasSurvey ?? false,
       isWorking: false,
       maxRows: 10,
-      bodyColumns: 160,
+      bodyColumns: over.bodyColumns ?? 160,
       scroll: { offset: 0, bodyRows: 10 },
       view: {},
     },
@@ -71,6 +71,19 @@ describe('AbovePrompt band', () => {
       const ui = await $.ui.mount(band(surface, { hasSurvey: true }))
       expect(await ui.find({ key: 'settings' })).toBeUndefined()
       expect(await ui.find({ text: 'engine survey' })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('a narrow bar wraps instead of dropping segments', async ($, on) => {
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount(band(surface, { bodyColumns: 40 }))
+      for (const label of ['5h', 'wk', 'ctx', 'cache', 'thread', 'month']) {
+        expect(await ui.find({ text: new RegExp(`\\b${label}\\b`) })).toBeDefined()
+      }
+      expect(await ui.find({ key: 'settings' })).toBeDefined()
       await ui.unmount()
     }
   })

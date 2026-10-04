@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { fit, segments, toneFor } from '../src/bar'
+import { segments, toneFor } from '../src/bar'
 import type { View } from '../src/bar'
 import { DEFAULT_SETTINGS } from '../src/settings'
 import type { Settings } from '../types'
@@ -113,15 +113,4 @@ describe('toneFor', () => {
   test('off without threshold colors', () => {
     expect(toneFor(95, { ...DEFAULT_SETTINGS, thresholdColors: false })).toBeUndefined()
   })
-})
-
-describe('fit', () => {
-  test('fit drops lowest priority first and keeps buttons', () => {
-    const kept = fit(segments(view()), 110, 20).map(s => s.key)
-    expect(kept).toEqual(['fiveHour', 'weekly', 'context', 'cache', 'thread'])
-  })
-
-  test('everything fits when wide', () => expect(fit(segments(view()), 200, 20)).toHaveLength(7))
-
-  test('nothing fits at zero columns', () => expect(fit(segments(view()), 0, 20)).toEqual([]))
 })

@@ -37,6 +37,8 @@ declare module 'claude-code' {
       projection: number | null
       /** When the last main-thread model request started (epoch ms): the prompt cache's timer restarts then. */
       cacheAt: number | null
+      /** Session cost when the running main-thread turn started: last-turn cost's baseline. */
+      turnBaseline: { turnId: string; usd: number } | null
       /** Bumped every 30 s so countdowns redraw while idle. */
       tick: number
       settings: Settings

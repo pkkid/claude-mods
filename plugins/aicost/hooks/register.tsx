@@ -22,6 +22,7 @@ const projection = atom({ plugin: 'aicost', key: 'projection' } as const, null)
 const settings = atom({ plugin: 'aicost', key: 'settings' } as const, DEFAULT_SETTINGS)
 const isSettingsOpen = atom({ plugin: 'aicost', key: 'isSettingsOpen' } as const, false)
 const cacheAt = atom({ plugin: 'aicost', key: 'cacheAt' } as const, null)
+const turnBaseline = atom({ plugin: 'aicost', key: 'turnBaseline' } as const, null)
 const tick = atom({ plugin: 'aicost', key: 'tick' } as const, 0)
 const isHandingOff = atom({ plugin: 'aicost', key: 'isHandingOff' } as const, false)
 
@@ -30,8 +31,6 @@ const TICK_MS = 30_000
 /** Cache times older than this are dropped from the per-session store. */
 const CACHE_KEEP_MS = 2 * 60 * 60_000
 
-/** Session cost when each turn started, by turnId: the baseline for last-turn cost. */
-const costAtTurnStart = new Map<string, number>()
 /** The latest scan, kept here too so a store write that fails costs nothing but persistence. */
 let memoryCache: ScanCache | null = null
 let isScanning = false
@@ -200,16 +199,19 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const loaded = await loadSettings(storeOf($))
     await update($, settings, () => loaded)
-    // Limits carry over between sessions; thread cost and context belong to this session.
-    const last = (await $.store.get('lastSnapshot')) as Snapshot | undefined
-    const usage = await $.session.usage()
-    const fresh: Snapshot = {
-      fiveHour: toWindow(usage.rateLimits.find(r => r.kind === 'five_hour')) ?? last?.fiveHour,
-      weekly: toWindow(usage.rateLimits.find(r => r.kind === 'seven_day')) ?? last?.weekly,
-      context: usage.context,
-      threadUsd: usage.cost?.usd,
+    // $.state outlives a hot reload: a snapshot already there is this session's, so keep it.
+    // A new session carries over only the limits; thread cost and context are its own.
+    if ((await read($, snapshot)) === null) {
+      const last = (await $.store.get('lastSnapshot')) as Snapshot | undefined
+      const usage = await $.session.usage()
+      const fresh: Snapshot = {
+        fiveHour: toWindow(usage.rateLimits.find(r => r.kind === 'five_hour')) ?? last?.fiveHour,
+        weekly: toWindow(usage.rateLimits.find(r => r.kind === 'seven_day')) ?? last?.weekly,
+        context: usage.context,
+        threadUsd: usage.cost?.usd,
+      }
+      await update($, snapshot, () => fresh)
     }
-    await update($, snapshot, () => fresh)
     await restoreCacheAt($)
     $.clock.every(TICK_MS, () => void update($, tick, n => (n ?? 0) + 1))
     await $.command.register({ name: 'handoff', description: 'Write a handoff brief for a fresh session and copy it' })
@@ -221,7 +223,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     const cost = (await $.session.usage()).cost?.usd
     if (cost !== undefined) {
-      costAtTurnStart.set(e.turnId, cost)
+      await update($, turnBaseline, () => ({ turnId: e.turnId, usd: cost }))
     }
 
     return next(e)
@@ -248,8 +250,9 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       return next(e)
     }
-    const base = costAtTurnStart.get(e.turnId)
-    costAtTurnStart.clear()
+    const baseline = await read($, turnBaseline)
+    const base = baseline?.turnId === e.turnId ? baseline.usd : undefined
+    await update($, turnBaseline, () => null)
     const cost = (await $.session.usage()).cost?.usd
     if (cost !== undefined) {
       const lastTurnUsd = base === undefined ? undefined : cost - base
@@ -290,7 +293,7 @@ export const register: Register = on => {
       settings: current,
       now: await $.clock.now(),
     }
-    const flags = { isWorking: e.props.isWorking, isHandingOff: await read($, isHandingOff), columns: e.props.bodyColumns }
+    const flags = { isWorking: e.props.isWorking, isHandingOff: await read($, isHandingOff) }
 
     return renderBar(el, view, flags, {
       handoff: () => void handoff($, e.surface).then(text => $.ui.toast(text)),
