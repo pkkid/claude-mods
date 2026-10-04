@@ -1,0 +1,9 @@
+{
+  "name": "aicost",
+  "version": "0.1.0",
+  "description": "Subscription usage, API-equivalent cost and context bar above the prompt",
+  "author": {
+    "name": "Michael Shepanski"
+  },
+  "types": "./types/index.d.ts"
+}

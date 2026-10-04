@@ -1,0 +1,14 @@
+{
+  "name": "claude-mods",
+  "description": "Personal Claude Code mods: small function-hook plugins for the terminal and the desktop Code tab",
+  "owner": {
+    "name": "Michael Shepanski"
+  },
+  "plugins": [
+    {
+      "name": "aicost",
+      "source": "./plugins/aicost",
+      "description": "Subscription usage, API-equivalent cost and context bar above the prompt"
+    }
+  ]
+}
