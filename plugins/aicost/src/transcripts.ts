@@ -1,14 +1,14 @@
 import { price } from './pricing'
 import type { TokenUsage } from './pricing'
 
-export type ScanEntry = { name: string; kind: string; size: number; mtimeMs: number }
+export type ScanEntry = { name: string; kind: 'file' | 'dir' | 'other'; size: number; mtimeMs: number }
 
 export type ScanIO = {
   list(dir: string): Promise<ScanEntry[]>
   /** The whole file; only called for files of at most MAX_READ bytes. */
   readBytes(path: string): Promise<Uint8Array>
-  /** The file's bytes from `offset` on; rejects when no tail is available. */
-  tail(path: string, offset: number): Promise<Uint8Array>
+  /** The file's bytes from `offset` on, possibly cut short (`isTruncated`); rejects when no tail is available. */
+  tail(path: string, offset: number): Promise<{ bytes: Uint8Array; isTruncated: boolean }>
 }
 
 /** `isEstimate`: a priced row used an estimated rate. `isFailed`: the last read failed, so it is retried. */
@@ -25,7 +25,13 @@ export type ScanCache = {
 export const MAX_READ = 4 * 1024 * 1024
 
 const NEWLINE = 0x0a
+const ID_KEY_LENGTH = 16
 const decoder = new TextDecoder()
+
+/** Message ids share a long constant prefix; their tail is unique enough and keeps the stored set small. */
+function idKey(id: string): string {
+  return id.slice(-ID_KEY_LENGTH)
+}
 
 export function monthKey(ms: number): string {
   const d = new Date(ms)
@@ -60,13 +66,13 @@ export function parseChunk(
       continue
     }
     const message = row.message
-    if (row.type !== 'assistant' || !message?.usage || !message.model || !message.id || seen.has(message.id)) {
+    if (row.type !== 'assistant' || !message?.usage || !message.model || !message.id || seen.has(idKey(message.id))) {
       continue
     }
     if (!row.timestamp || monthKey(Date.parse(row.timestamp)) !== month) {
       continue
     }
-    seen.add(message.id)
+    seen.add(idKey(message.id))
     const priced = price(message.model, message.usage)
     usd += priced.usd
     isEstimate ||= priced.isEstimate
@@ -78,7 +84,7 @@ export function parseChunk(
 async function walk(io: ScanIO, dir: string, out: (ScanEntry & { path: string })[]): Promise<void> {
   for (const entry of await io.list(dir)) {
     const path = `${dir}/${entry.name}`
-    if (entry.kind === 'directory') {
+    if (entry.kind === 'dir') {
       await walk(io, path, out)
     } else if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
       out.push({ ...entry, path })
@@ -105,15 +111,24 @@ export async function scanMonth(io: ScanIO, root: string, cache: ScanCache | nul
     }
     const file: FileCache =
       known && entry.size >= known.offset ? { ...known } : { offset: 0, size: 0, usd: 0, isEstimate: false, isFailed: false }
-    try {
-      const fresh =
-        entry.size <= MAX_READ
-          ? (await io.readBytes(entry.path)).subarray(file.offset)
-          : await io.tail(entry.path, file.offset)
-      const parsed = parseChunk(fresh, month, seen)
+    const take = (bytes: Uint8Array): number => {
+      const parsed = parseChunk(bytes, month, seen)
       file.usd += parsed.usd
       file.offset += parsed.consumed
       file.isEstimate ||= parsed.isEstimate
+
+      return parsed.consumed
+    }
+    try {
+      if (entry.size <= MAX_READ) {
+        take((await io.readBytes(entry.path)).subarray(file.offset))
+      } else {
+        let isMore = true
+        while (isMore) {
+          const { bytes, isTruncated } = await io.tail(entry.path, file.offset)
+          isMore = take(bytes) > 0 && isTruncated
+        }
+      }
       file.isFailed = false
     } catch {
       file.isFailed = true

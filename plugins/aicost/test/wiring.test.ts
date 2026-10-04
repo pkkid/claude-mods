@@ -1,0 +1,78 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
+
+const NOW = new Date(2026, 9, 4, 12, 0).getTime()
+
+const PREVIOUS = {
+  fiveHour: { percentUsed: 40 },
+  threadUsd: 12.4,
+  lastTurnUsd: 0.83,
+  context: { window: 200_000, tokens: 120_000, percent: 61 },
+}
+
+function band() {
+  return {
+    plugin: 'aicost',
+    surface: 'desktop' as const,
+    component: 'AbovePrompt' as const,
+    props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+  }
+}
+
+/** Starts a session whose `$.session.usage()` reports `cost.usd` as `costs.usd`. */
+async function start($: Engine, on: On, costs: { usd: number }) {
+  mock.store(on, { lastSnapshot: PREVIOUS })
+  mock.clock(on, { now: NOW })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [], cost: { usd: costs.usd } } }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
+}
+
+function complete(turnId: string, agentId?: string) {
+  return { reason: 'answer' as const, text: '', answer: '', durationMs: 1, isAborted: false, turnId, agentId }
+}
+
+async function barText($: Engine): Promise<string> {
+  const ui = await $.ui.mount(band())
+  const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('')
+  await ui.unmount()
+
+  return text
+}
+
+describe('wiring', () => {
+  test('a new session keeps last limits but not last thread cost or context', async ($, on) => {
+    await start($, on, { usd: 0 })
+    const text = await barText($)
+    expect(text).toContain('5h 40%')
+    expect(text).toContain('thread $0.00')
+    expect(text).not.toContain('12.40')
+    expect(text).not.toContain('0.83')
+    expect(text).toContain('ctx —')
+  })
+
+  test('last-turn cost spans the main turn, ignoring subagent turns', async ($, on) => {
+    const costs = { usd: 1 }
+    await start($, on, costs)
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    costs.usd = 2.5
+    await $.turn.complete(complete('s1', 'sub'))
+    expect(await barText($)).not.toContain('(+')
+    costs.usd = 3
+    await $.turn.complete(complete('t1'))
+    expect(await barText($)).toContain('thread $3.00 (+$2.00)')
+  })
+
+  test('no last-turn cost without a turn start baseline', async ($, on) => {
+    const costs = { usd: 2 }
+    await start($, on, costs)
+    await $.turn.complete(complete('unknown'))
+    const text = await barText($)
+    expect(text).toContain('thread $2.00')
+    expect(text).not.toContain('(+')
+  })
+})

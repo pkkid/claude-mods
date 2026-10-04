@@ -25,7 +25,10 @@ const isHandingOff = atom({ plugin: 'aicost', key: 'isHandingOff' } as const, fa
 
 const encoder = new TextEncoder()
 
-let costAtSubmit: number | undefined
+/** Session cost when each turn started, by turnId: the baseline for last-turn cost. */
+const costAtTurnStart = new Map<string, number>()
+/** The latest scan, kept here too so a store write that fails costs nothing but persistence. */
+let memoryCache: ScanCache | null = null
 let isScanning = false
 let isScanPending = false
 let hasLoggedScanError = false
@@ -52,7 +55,7 @@ function scanIO($: EngineInterface): ScanIO {
         throw new Error(`tail exited ${run.exitCode}`)
       }
 
-      return encoder.encode(run.stdout)
+      return { bytes: encoder.encode(run.stdout), isTruncated: run.isStdoutTruncated }
     },
   }
 }
@@ -65,7 +68,7 @@ async function projectsRoot($: EngineInterface): Promise<string> {
 }
 
 async function readCache($: EngineInterface): Promise<ScanCache | null> {
-  return ((await $.store.get('scanCache')) as ScanCache | undefined) ?? null
+  return memoryCache ?? ((await $.store.get('scanCache')) as ScanCache | undefined) ?? null
 }
 
 async function scan($: EngineInterface): Promise<void> {
@@ -78,17 +81,22 @@ async function scan($: EngineInterface): Promise<void> {
     do {
       isScanPending = false
       const next = await scanMonth(scanIO($), await projectsRoot($), await readCache($), await $.clock.now())
-      await $.store.set('scanCache', next)
+      memoryCache = next
+      await $.store.set('scanCache', next).catch((err: unknown) => logScanError($, err))
       await update($, month, () => ({ usd: next.usd, isEstimate: next.isEstimate, status: 'ready' as const }))
     } while (isScanPending)
   } catch (err) {
     await update($, month, m => ({ usd: m?.usd ?? 0, isEstimate: m?.isEstimate ?? false, status: 'error' as const }))
-    if (!hasLoggedScanError) {
-      hasLoggedScanError = true
-      $.ui.log(`aicost: monthly cost scan failed: ${errorText(err)}`)
-    }
+    logScanError($, err)
   } finally {
     isScanning = false
+  }
+}
+
+function logScanError($: EngineInterface, err: unknown): void {
+  if (!hasLoggedScanError) {
+    hasLoggedScanError = true
+    $.ui.log(`aicost: monthly cost scan failed: ${errorText(err)}`)
   }
 }
 
@@ -170,18 +178,27 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const loaded = await loadSettings(storeOf($))
     await update($, settings, () => loaded)
+    // Limits carry over between sessions; thread cost and context belong to this session.
     const last = (await $.store.get('lastSnapshot')) as Snapshot | undefined
-    if (last) {
-      await update($, snapshot, () => last)
+    const usage = await $.session.usage()
+    const fresh: Snapshot = {
+      fiveHour: toWindow(usage.rateLimits.find(r => r.kind === 'five_hour')) ?? last?.fiveHour,
+      weekly: toWindow(usage.rateLimits.find(r => r.kind === 'seven_day')) ?? last?.weekly,
+      context: usage.context,
+      threadUsd: usage.cost?.usd,
     }
+    await update($, snapshot, () => fresh)
     await $.command.register({ name: 'handoff', description: 'Write a handoff brief for a fresh session and copy it' })
     startScan($)
 
     return next(e)
   })
 
-  on('prompt.submit', async ($, e, next) => {
-    costAtSubmit = (await $.session.usage()).cost?.usd
+  on('turn.start', async ($, e, next) => {
+    const cost = (await $.session.usage()).cost?.usd
+    if (cost !== undefined) {
+      costAtTurnStart.set(e.turnId, cost)
+    }
 
     return next(e)
   })
@@ -193,9 +210,14 @@ export const register: Register = on => {
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) {
+      return next(e)
+    }
+    const base = costAtTurnStart.get(e.turnId)
+    costAtTurnStart.clear()
     const cost = (await $.session.usage()).cost?.usd
     if (cost !== undefined) {
-      const lastTurnUsd = cost - (costAtSubmit ?? cost)
+      const lastTurnUsd = base === undefined ? undefined : cost - base
       await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost, lastTurnUsd }))
     }
     startScan($)

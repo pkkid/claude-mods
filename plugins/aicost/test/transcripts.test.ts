@@ -23,7 +23,7 @@ function expectClose(actual: number, expected: number) {
 
 type FakeFile = { text: string; mtimeMs?: number; size?: number }
 
-function fakeIO(files: Record<string, FakeFile>, opts: { tailFails?: boolean } = {}) {
+function fakeIO(files: Record<string, FakeFile>, opts: { tailFails?: boolean; tailLimit?: number } = {}) {
   const calls = { readBytes: [] as string[], tail: [] as [string, number][] }
   const io: ScanIO = {
     async list(dir) {
@@ -36,7 +36,7 @@ function fakeIO(files: Record<string, FakeFile>, opts: { tailFails?: boolean } =
         entries.set(
           name,
           rest.length > 0
-            ? { name, kind: 'directory', size: 0, mtimeMs: 0 }
+            ? { name, kind: 'dir', size: 0, mtimeMs: 0 }
             : { name, kind: 'file', size: file.size ?? encoder.encode(file.text).length, mtimeMs: file.mtimeMs ?? NOW },
         )
       }
@@ -54,7 +54,10 @@ function fakeIO(files: Record<string, FakeFile>, opts: { tailFails?: boolean } =
         throw new Error('no tail')
       }
 
-      return encoder.encode(files[path]?.text ?? '').subarray(offset)
+      const rest = encoder.encode(files[path]?.text ?? '').subarray(offset)
+      const limit = opts.tailLimit ?? Infinity
+
+      return { bytes: rest.subarray(0, limit), isTruncated: rest.length > limit }
     },
   }
 
@@ -190,6 +193,24 @@ describe('scanMonth', () => {
     const second = await scanMonth(working.io, ROOT, first, NOW)
     expectClose(second.usd, 4)
     expect(second.isEstimate).toBe(false)
+  })
+
+  test('truncated tail output is continued from the new offset', async () => {
+    const path = `${ROOT}/p/big.jsonl`
+    const text = [row('a', { input_tokens: M }), row('b', { input_tokens: M }), row('c', { input_tokens: M })].join('\n') + '\n'
+    const oneAndAHalfRows = Math.floor(encoder.encode(row('a', { input_tokens: M })).length * 1.5)
+    const { io } = fakeIO({ [path]: { text, size: MAX_READ + 1 } }, { tailLimit: oneAndAHalfRows })
+    const r = await scanMonth(io, ROOT, null, NOW)
+    expectClose(r.usd, 12)
+    expect(r.files[path]?.offset).toBe(encoder.encode(text).length)
+  })
+
+  test('seen ids are stored compactly', async () => {
+    const id = 'msg_011CfStwMLXPok9fRjFkCCfQ'
+    const { io } = fakeIO({ [`${ROOT}/p/s.jsonl`]: { text: `${row(id, { input_tokens: M })}\n${row(id, { input_tokens: M })}\n` } })
+    const r = await scanMonth(io, ROOT, null, NOW)
+    expectClose(r.usd, 4)
+    expect(r.seenIds.every(x => x.length <= 16)).toBe(true)
   })
 
   test('sessionUsd sums the session and its subagents', async () => {
