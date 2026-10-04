@@ -21,6 +21,11 @@ cost at Anthropic API list prices.
 Usage and context turn yellow at 70% and red at 90%. A value not known yet shows `—`; until the first response of a
 session the bar shows the figures from your previous session.
 
+## Show or hide the bar
+
+`/aicost` toggles the whole bar (buttons included); `/aicost on` and `/aicost off` set it. The choice holds across
+sessions. `/handoff` works either way.
+
 ## Settings
 
 Press **...** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context

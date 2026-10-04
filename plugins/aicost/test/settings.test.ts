@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { DEFAULT_SETTINGS, TOGGLES, loadSettings, normalizeSettings, saveSettings } from '../src/settings'
+import { DEFAULT_SETTINGS, TOGGLES, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 
 function memoryStore(entries: Record<string, unknown> = {}): KeyStore {
@@ -46,4 +46,20 @@ describe('settings', () => {
     await saveSettings(store, { ...DEFAULT_SETTINGS, monthlyCost: false })
     expect((await loadSettings(store)).monthlyCost).toBe(false)
   })
+})
+
+describe('nextHidden', () => {
+  test('no argument toggles', () => {
+    expect(nextHidden('', false)).toBe(true)
+    expect(nextHidden('  ', true)).toBe(false)
+  })
+  test('on and show reveal', () => {
+    expect(nextHidden('on', true)).toBe(false)
+    expect(nextHidden('Show', true)).toBe(false)
+  })
+  test('off and hide conceal', () => {
+    expect(nextHidden('off', false)).toBe(true)
+    expect(nextHidden(' HIDE ', false)).toBe(true)
+  })
+  test('anything else is null', () => expect(nextHidden('bogus', false)).toBeNull())
 })

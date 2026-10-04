@@ -43,6 +43,8 @@ declare module 'claude-code' {
       tick: number
       settings: Settings
       isSettingsOpen: boolean
+      /** The whole bar hidden by /aicost; mirrored in $.store so it holds across sessions. */
+      isHidden: boolean
       isHandingOff: boolean
     }
   }

@@ -41,3 +41,19 @@ export async function loadSettings(store: KeyStore): Promise<Settings> {
 export async function saveSettings(store: KeyStore, settings: Settings): Promise<void> {
   await store.set('settings', settings)
 }
+
+/** Whether `/aicost <args>` hides the bar: no argument toggles, on/show and off/hide set it; null for anything else. */
+export function nextHidden(args: string, isHidden: boolean): boolean | null {
+  const word = args.trim().toLowerCase()
+  if (word === '') {
+    return !isHidden
+  }
+  if (word === 'on' || word === 'show') {
+    return false
+  }
+  if (word === 'off' || word === 'hide') {
+    return true
+  }
+
+  return null
+}

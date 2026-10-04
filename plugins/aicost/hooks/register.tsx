@@ -7,7 +7,7 @@ import { renderBar, renderSettings } from '../src/bar'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput } from '../src/handoff'
-import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from '../src/settings'
+import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionUsd } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
@@ -20,6 +20,7 @@ const snapshot = atom({ plugin: 'aicost', key: 'snapshot' } as const, null)
 const month = atom({ plugin: 'aicost', key: 'month' } as const, { usd: 0, isEstimate: false, status: 'loading' })
 const projection = atom({ plugin: 'aicost', key: 'projection' } as const, null)
 const settings = atom({ plugin: 'aicost', key: 'settings' } as const, DEFAULT_SETTINGS)
+const isHidden = atom({ plugin: 'aicost', key: 'isHidden' } as const, false)
 const isSettingsOpen = atom({ plugin: 'aicost', key: 'isSettingsOpen' } as const, false)
 const cacheAt = atom({ plugin: 'aicost', key: 'cacheAt' } as const, null)
 const turnBaseline = atom({ plugin: 'aicost', key: 'turnBaseline' } as const, null)
@@ -219,6 +220,9 @@ export const register: Register = on => {
     }
     await restoreCacheAt($)
     $.clock.every(TICK_MS, () => void update($, tick, n => (n ?? 0) + 1))
+    const hidden = (await $.store.get('isHidden')) === true
+    await update($, isHidden, () => hidden)
+    await $.command.register({ name: 'aicost', description: 'Show or hide the aicost bar', argumentHint: '[on|off]' })
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
 
@@ -268,11 +272,22 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('command.run', { command: 'aicost' }, async ($, e) => {
+    const hidden = nextHidden(e.args, await read($, isHidden))
+    if (hidden === null) {
+      return { text: 'Usage: /aicost [on|off] (no argument toggles the bar)' }
+    }
+    await update($, isHidden, () => hidden)
+    await $.store.set('isHidden', hidden)
+
+    return { text: hidden ? 'aicost bar hidden. Run /aicost to show it.' : 'aicost bar shown.' }
+  })
+
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) {
+    if (e.props.hasSurvey || (await read($, isHidden))) {
       return next(e)
     }
     await read($, tick)

@@ -21,8 +21,8 @@ function band() {
 }
 
 /** Starts a session whose `$.session.usage()` reports `cost.usd` as `costs.usd`. */
-async function start($: Engine, on: On, costs: { usd: number }) {
-  mock.store(on, { lastSnapshot: PREVIOUS })
+async function start($: Engine, on: On, costs: { usd: number }, stored: Record<string, unknown> = {}) {
+  mock.store(on, { lastSnapshot: PREVIOUS, ...stored })
   mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -159,5 +159,44 @@ describe('wiring', () => {
     expect(fills).toEqual(['/handoff'])
     expect(commands).toEqual([])
     expect(toasts).toEqual([])
+  })
+
+  function runAicost($: Engine, args: string) {
+    return $.command.run({ command: 'aicost', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+  }
+
+  async function hasBar($: Engine): Promise<boolean> {
+    const ui = await $.ui.mount(band())
+    const found = (await ui.find({ key: 'settings' })) !== undefined
+    await ui.unmount()
+
+    return found
+  }
+
+  function engineBand(on: On) {
+    on('ui.render', { component: 'AbovePrompt' }, ($e, e) => $e.ui.resolve(e).Text({ children: 'engine band' }))
+  }
+
+  test('/aicost toggles the bar and on/off set it', async ($, on) => {
+    engineBand(on)
+    await start($, on, { usd: 0 })
+    expect(await hasBar($)).toBe(true)
+    expect((await runAicost($, '')).text).toBe('aicost bar hidden. Run /aicost to show it.')
+    expect(await hasBar($)).toBe(false)
+    expect((await runAicost($, 'on')).text).toBe('aicost bar shown.')
+    expect(await hasBar($)).toBe(true)
+    await runAicost($, 'off')
+    expect(await hasBar($)).toBe(false)
+  })
+
+  test('/aicost with an unknown argument explains usage', async ($, on) => {
+    await start($, on, { usd: 0 })
+    expect((await runAicost($, 'bogus')).text).toBe('Usage: /aicost [on|off] (no argument toggles the bar)')
+  })
+
+  test('a hidden bar stays hidden in a new session', async ($, on) => {
+    engineBand(on)
+    await start($, on, { usd: 0 }, { isHidden: true })
+    expect(await hasBar($)).toBe(false)
   })
 })
