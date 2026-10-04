@@ -2,7 +2,6 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
-const BOXES = { terminal: { on: '[x]', off: '[ ]' }, desktop: { on: '☑', off: '☐' } }
 
 function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean } = {}) {
   return {
@@ -33,10 +32,10 @@ describe('AbovePrompt band', () => {
       expect(await ui.find({ text: 'aicost settings' })).toBeDefined()
 
       await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe(`${BOXES[surface].off} Weekly usage`)
+      expect((await ui.find({ key: 'weekly' }))?.text).toBe('[ ] Weekly usage')
 
       await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe(`${BOXES[surface].on} Weekly usage`)
+      expect((await ui.find({ key: 'weekly' }))?.text).toBe('[✓] Weekly usage')
       await ui.press({ key: 'weekly' })
 
       await ui.press({ key: 'done' })

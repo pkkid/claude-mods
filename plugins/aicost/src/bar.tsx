@@ -1,4 +1,4 @@
-import type { Elements, RenderSurface } from 'claude-code'
+import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
 import { TOGGLES } from './settings'
@@ -127,21 +127,7 @@ export function renderBar(
   )
 }
 
-/** A checkbox glyph on surfaces that draw native buttons; bracket text on the terminal. */
-function checkbox(isOn: boolean, surface: RenderSurface): string {
-  if (surface === 'terminal') {
-    return isOn ? '[x]' : '[ ]'
-  }
-
-  return isOn ? '☑' : '☐'
-}
-
-export function renderSettings(
-  el: El,
-  settings: Settings,
-  surface: RenderSurface,
-  on: { toggle(key: ToggleKey): void; close(): void },
-) {
+export function renderSettings(el: El, settings: Settings, on: { toggle(key: ToggleKey): void; close(): void }) {
   const { Box, Text, Button } = el
 
   return (
@@ -149,7 +135,7 @@ export function renderSettings(
       <Text bold>aicost settings</Text>
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
         {TOGGLES.map(t => (
-          <Button key={t.key} label={`${checkbox(settings[t.key], surface)} ${t.label}`} plain onPress={() => on.toggle(t.key)} />
+          <Button key={t.key} label={`[${settings[t.key] ? '✓' : ' '}] ${t.label}`} plain onPress={() => on.toggle(t.key)} />
         ))}
       </Box>
       <Box flexDirection="row" justifyContent="flex-end">
