@@ -25,7 +25,7 @@ describe('AbovePrompt band', () => {
     mock.clock(on, { now: NOW })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount(band(surface))
-      expect((await ui.find({ key: 'settings' }))?.text).toBe('⚙️')
+      expect((await ui.find({ key: 'settings' }))?.text).toBe('Settings')
       expect(await ui.find({ text: /wk/ })).toBeDefined()
 
       await ui.press({ key: 'settings' })

@@ -136,7 +136,7 @@ export function renderBar(
             onPress={() => isHandoffIdle && on.handoff()}
           />
         )}
-        <Button key="settings" label="⚙️" onPress={() => on.openSettings()} />
+        <Button key="settings" label="Settings" onPress={() => on.openSettings()} />
       </Box>
     </Box>
   )
