@@ -4,7 +4,7 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [⚙]
+5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [Settings]
 ```
 
 | Segment | Meaning |
@@ -23,7 +23,7 @@ session the bar shows the figures from your previous session.
 
 ## Settings
 
-Press **⚙** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
+Press **Settings** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
 tokens, cache warmth, thread cost, last-turn cost, monthly cost, burn-rate projection, threshold colors, threshold alerts, Handoff
 button. Choices are saved across sessions. Press **Done** to close it.
 
