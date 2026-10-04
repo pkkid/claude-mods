@@ -240,7 +240,7 @@ export const register: Register = on => {
     const current = normalizeSettings(await read($, settings))
 
     if (await read($, isSettingsOpen)) {
-      return renderSettings(el, current, {
+      return renderSettings(el, current, e.surface, {
         toggle: key => void toggleSetting($, key),
         close: () => void update($, isSettingsOpen, () => false),
       })
