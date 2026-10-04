@@ -1,7 +1,5 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { handoffOutput } from '../src/handoff'
-
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 const SURFACES = ['terminal', 'desktop'] as const
 
@@ -86,25 +84,6 @@ describe('AbovePrompt band', () => {
         expect(await ui.find({ text: new RegExp(`\\b${label}\\b`) })).toBeDefined()
       }
       expect(await ui.find({ key: 'settings' })).toBeDefined()
-      await ui.unmount()
-    }
-  })
-
-  test('the /handoff row draws the brief as highlighted markdown code', async ($, on) => {
-    mock.store(on, {})
-    mock.clock(on, { now: NOW })
-    const brief = '## Goal\nShip aicost'
-    for (const surface of SURFACES) {
-      const ui = await $.ui.mount({
-        plugin: 'aicost',
-        surface,
-        component: 'CommandOutput' as const,
-        props: { command: 'handoff', args: '', text: handoffOutput(brief), isErrored: false },
-      })
-      const code = await ui.find({ type: 'Code' })
-      expect(code?.text).toBe(brief)
-      expect(code?.props).toMatchObject({ language: 'markdown' })
-      expect(await ui.find({ text: 'Handoff brief' })).toBeDefined()
       await ui.unmount()
     }
   })

@@ -6,7 +6,7 @@ import type { AlertState } from '../src/alerts'
 import { renderBar, renderSettings } from '../src/bar'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
-import { HANDOFF_PROMPT, MAX_CODE_CHARS, handoffOutput, parseHandoffOutput } from '../src/handoff'
+import { HANDOFF_PROMPT, handoffOutput } from '../src/handoff'
 import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionUsd } from '../src/transcripts'
@@ -270,22 +270,6 @@ export const register: Register = on => {
 
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
-
-  // The stored row stays fenced markdown (what the model reads); on screen it is drawn as highlighted code.
-  on('ui.render', { component: 'CommandOutput', props: { command: 'handoff' } }, async ($, e, next) => {
-    const brief = e.props.isErrored ? null : parseHandoffOutput(e.props.text)
-    if (brief === null || brief.length > MAX_CODE_CHARS) {
-      return next(e)
-    }
-    const { Box, Text, Code } = $.ui.resolve(e)
-
-    return (
-      <Box flexDirection="column">
-        <Text bold>Handoff brief</Text>
-        <Code source={brief.replace(/\r/g, '')} language="markdown" />
-      </Box>
-    )
-  })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) {

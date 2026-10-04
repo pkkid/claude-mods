@@ -32,7 +32,7 @@ Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%
 ## Handoff
 
 `/handoff` asks the current conversation for a brief (goal, current state, decisions, open tasks, key
-files, next step), prints it in the chat as a highlighted markdown code block, and copies the raw markdown to the clipboard. Paste it into a new session to
+files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
 The **Handoff** button puts `/handoff` in the prompt box for you to send with Enter: a mod cannot answer a command it
