@@ -139,6 +139,11 @@ describe('wiring', () => {
   test('the Handoff button puts /handoff in the prompt box', async ($, on) => {
     const fills: string[] = []
     const commands: string[] = []
+    const toasts: string[] = []
+    on('ui.toast', (_, e) => {
+      toasts.push(e.text)
+      return { value: undefined }
+    })
     on('prompt.fill', (_, e) => {
       fills.push(e.text)
       return { isFilled: true, text: e.text }
@@ -153,5 +158,6 @@ describe('wiring', () => {
     await ui.unmount()
     expect(fills).toEqual(['/handoff'])
     expect(commands).toEqual([])
+    expect(toasts).toEqual([])
   })
 })

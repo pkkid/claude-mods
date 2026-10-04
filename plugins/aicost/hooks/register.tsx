@@ -154,7 +154,9 @@ async function handoff($: EngineInterface): Promise<string> {
 
 async function fillHandoff($: EngineInterface): Promise<void> {
   const filled = await $.prompt.fill({ text: '/handoff' })
-  $.ui.toast(filled.isFilled ? 'Press Enter to run /handoff' : 'Type /handoff to write a handoff brief')
+  if (!filled.isFilled) {
+    $.ui.toast('Type /handoff to write a handoff brief')
+  }
 }
 
 async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTINGS): Promise<void> {
