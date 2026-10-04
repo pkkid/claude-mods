@@ -135,4 +135,23 @@ describe('wiring', () => {
     expect(copies).toEqual([brief])
     expect(writes).toEqual([])
   })
+
+  test('the Handoff button puts /handoff in the prompt box', async ($, on) => {
+    const fills: string[] = []
+    const commands: string[] = []
+    on('prompt.fill', (_, e) => {
+      fills.push(e.text)
+      return { isFilled: true, text: e.text }
+    })
+    on('command.run', (_, e) => {
+      commands.push(e.command)
+      return { text: '' }
+    })
+    await start($, on, { usd: 0 })
+    const ui = await $.ui.mount(band())
+    await ui.press({ key: 'handoff' })
+    await ui.unmount()
+    expect(fills).toEqual(['/handoff'])
+    expect(commands).toEqual([])
+  })
 })

@@ -152,6 +152,11 @@ async function handoff($: EngineInterface): Promise<string> {
   }
 }
 
+async function fillHandoff($: EngineInterface): Promise<void> {
+  const filled = await $.prompt.fill({ text: '/handoff' })
+  $.ui.toast(filled.isFilled ? 'Press Enter to run /handoff' : 'Type /handoff to write a handoff brief')
+}
+
 async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTINGS): Promise<void> {
   const changed = await update($, settings, s => {
     const was = normalizeSettings(s)
@@ -290,7 +295,9 @@ export const register: Register = on => {
     const flags = { isWorking: e.props.isWorking, isHandingOff: await read($, isHandingOff) }
 
     return renderBar(el, view, flags, {
-      handoff: () => void $.command.run({ command: 'handoff' }).catch(err => $.ui.toast(`Handoff failed: ${errorText(err)}`)),
+      // A plugin can't answer a command it runs itself (the engine skips the caller's hooks),
+      // so the button stages /handoff in the prompt box for the person to send.
+      handoff: () => void fillHandoff($),
       openSettings: () => void update($, isSettingsOpen, () => true),
     })
   })
