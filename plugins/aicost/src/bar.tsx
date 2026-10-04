@@ -4,7 +4,15 @@ import { clockTime, duration, tokens, usd, weeklyReset } from './format'
 import { TOGGLES } from './settings'
 import type { MonthTotal, Settings, Snapshot, ToggleKey } from '../types'
 
-export type View = { snapshot: Snapshot | null; month: MonthTotal; projection: number | null; settings: Settings; now: number }
+export type View = {
+  snapshot: Snapshot | null
+  month: MonthTotal
+  projection: number | null
+  /** Start of the last main-thread model request, or null before one. */
+  cacheAt: number | null
+  settings: Settings
+  now: number
+}
 
 export type Tone = 'warn' | 'danger' | undefined
 
@@ -13,7 +21,12 @@ export type Segment = { key: string; text: string; tone?: Tone; priority: number
 
 export const SEPARATOR = ' │ '
 
+/** Claude Code writes the main conversation's prompt cache with the 1-hour TTL; each request restarts it. */
+export const CACHE_TTL = 60 * 60_000
+
 const DASH = '—'
+const MIN = 60_000
+const CACHE_WARN = 10 * MIN
 const TONE_COLORS = { warn: 'yellow', danger: 'red' } as const
 
 export function toneFor(pct: number | undefined, settings: Settings): Tone {
@@ -22,6 +35,17 @@ export function toneFor(pct: number | undefined, settings: Settings): Tone {
   }
 
   return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : undefined
+}
+
+function cacheSegment(cacheAt: number | null, now: number, settings: Settings): Segment {
+  if (cacheAt === null) {
+    return { key: 'cache', text: `cache ${DASH}`, priority: 3 }
+  }
+  const left = cacheAt + CACHE_TTL - now
+  const tone: Tone = !settings.thresholdColors ? undefined : left <= 0 ? 'danger' : left < CACHE_WARN ? 'warn' : undefined
+  const text = left <= 0 ? 'cache cold' : `cache ${Math.max(1, Math.ceil(left / MIN))}m`
+
+  return { key: 'cache', text, tone, priority: 3 }
 }
 
 function monthText(month: MonthTotal): string {
@@ -42,11 +66,11 @@ export function segments(view: View): Segment[] {
 
   if (on.fiveHour) {
     const reset = on.resets && fiveHour?.resetsAt ? ` ·${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
-    segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on), priority: 7 })
+    segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on), priority: 8 })
   }
   if (on.weekly) {
     const reset = on.resets && weekly?.resetsAt ? ` ·${weeklyReset(weekly.resetsAt, now)}` : ''
-    segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on), priority: 6 })
+    segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on), priority: 7 })
   }
   if (on.contextPercent || on.contextTokens) {
     const parts: string[] = []
@@ -58,15 +82,18 @@ export function segments(view: View): Segment[] {
     } else if (on.contextTokens && !on.contextPercent) {
       parts.push(DASH)
     }
-    segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on), priority: on.contextPercent ? 5 : 4 })
+    segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on), priority: on.contextPercent ? 6 : 5 })
+  }
+  if (on.cacheWarmth) {
+    segs.push(cacheSegment(view.cacheAt, now, on))
   }
   const last = snapshot?.lastTurnUsd
   if (on.threadCost) {
     const thread = snapshot?.threadUsd === undefined ? DASH : usd(snapshot.threadUsd)
     const turn = on.lastTurnCost && last !== undefined ? ` (+${usd(last)})` : ''
-    segs.push({ key: 'thread', text: `thread ${thread}${turn}`, priority: 3 })
+    segs.push({ key: 'thread', text: `thread ${thread}${turn}`, priority: 4 })
   } else if (on.lastTurnCost) {
-    segs.push({ key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}`, priority: 3 })
+    segs.push({ key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}`, priority: 4 })
   }
   if (on.monthlyCost) {
     segs.push({ key: 'month', text: monthText(view.month), priority: 2 })

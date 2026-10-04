@@ -21,9 +21,14 @@ const month = atom({ plugin: 'aicost', key: 'month' } as const, { usd: 0, isEsti
 const projection = atom({ plugin: 'aicost', key: 'projection' } as const, null)
 const settings = atom({ plugin: 'aicost', key: 'settings' } as const, DEFAULT_SETTINGS)
 const isSettingsOpen = atom({ plugin: 'aicost', key: 'isSettingsOpen' } as const, false)
+const cacheAt = atom({ plugin: 'aicost', key: 'cacheAt' } as const, null)
+const tick = atom({ plugin: 'aicost', key: 'tick' } as const, 0)
 const isHandingOff = atom({ plugin: 'aicost', key: 'isHandingOff' } as const, false)
 
 const encoder = new TextEncoder()
+const TICK_MS = 30_000
+/** Cache times older than this are dropped from the per-session store. */
+const CACHE_KEEP_MS = 2 * 60 * 60_000
 
 /** Session cost when each turn started, by turnId: the baseline for last-turn cost. */
 const costAtTurnStart = new Map<string, number>()
@@ -97,6 +102,23 @@ function logScanError($: EngineInterface, err: unknown): void {
   if (!hasLoggedScanError) {
     hasLoggedScanError = true
     $.ui.log(`aicost: monthly cost scan failed: ${errorText(err)}`)
+  }
+}
+
+type CacheTimes = Record<string, number>
+
+async function rememberCacheAt($: EngineInterface, at: number): Promise<void> {
+  const sessionId = await $.session.id()
+  const stored = ((await $.store.get('cacheAt')) as CacheTimes | undefined) ?? {}
+  const kept = Object.fromEntries(Object.entries(stored).filter(([, t]) => at - t < CACHE_KEEP_MS))
+  await $.store.set('cacheAt', { ...kept, [sessionId]: at })
+}
+
+async function restoreCacheAt($: EngineInterface): Promise<void> {
+  const stored = ((await $.store.get('cacheAt')) as CacheTimes | undefined) ?? {}
+  const at = stored[await $.session.id()]
+  if (at !== undefined) {
+    await update($, cacheAt, () => at)
   }
 }
 
@@ -188,6 +210,8 @@ export const register: Register = on => {
       threadUsd: usage.cost?.usd,
     }
     await update($, snapshot, () => fresh)
+    await restoreCacheAt($)
+    $.clock.every(TICK_MS, () => void update($, tick, n => (n ?? 0) + 1))
     await $.command.register({ name: 'handoff', description: 'Write a handoff brief for a fresh session and copy it' })
     startScan($)
 
@@ -207,6 +231,17 @@ export const register: Register = on => {
     await measure($, e)
 
     return next(e)
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      const at = await $.clock.now()
+      await update($, cacheAt, () => at)
+      // Persisting is a nicety (survives reloads); it must never hold up the model request.
+      await rememberCacheAt($, at).catch(() => undefined)
+    }
+
+    return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -236,6 +271,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey) {
       return next(e)
     }
+    await read($, tick)
     const el = $.ui.resolve(e)
     const current = normalizeSettings(await read($, settings))
 
@@ -250,6 +286,7 @@ export const register: Register = on => {
       snapshot: await read($, snapshot),
       month: await read($, month),
       projection: await read($, projection),
+      cacheAt: await read($, cacheAt),
       settings: current,
       now: await $.clock.now(),
     }

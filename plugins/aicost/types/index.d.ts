@@ -4,6 +4,7 @@ export type ToggleKey =
   | 'resets'
   | 'contextPercent'
   | 'contextTokens'
+  | 'cacheWarmth'
   | 'threadCost'
   | 'lastTurnCost'
   | 'monthlyCost'
@@ -34,6 +35,10 @@ declare module 'claude-code' {
       snapshot: Snapshot | null
       month: MonthTotal
       projection: number | null
+      /** When the last main-thread model request started (epoch ms): the prompt cache's timer restarts then. */
+      cacheAt: number | null
+      /** Bumped every 30 s so countdowns redraw while idle. */
+      tick: number
       settings: Settings
       isSettingsOpen: boolean
       isHandingOff: boolean

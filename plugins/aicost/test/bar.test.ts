@@ -18,6 +18,7 @@ function view(over: Partial<View> = {}, settings: Partial<Settings> = {}): View 
       lastTurnUsd: 0.41,
     },
     month: { usd: 184.2, isEstimate: false, status: 'ready' },
+    cacheAt: NOW - 18 * MIN,
     projection: new Date(2026, 9, 4, 15, 40).getTime(),
     settings: { ...DEFAULT_SETTINGS, ...settings },
     now: NOW,
@@ -33,6 +34,7 @@ describe('segments', () => {
       '5h 42% ·1h12m',
       'wk 18% ·Thu',
       'ctx 31% 62k/200k',
+      'cache 42m',
       'thread $3.12 (+$0.41)',
       'month $184.20',
       'limit ~3:40pm',
@@ -54,7 +56,7 @@ describe('segments', () => {
   })
 
   test('missing snapshot shows dashes', () => {
-    expect(texts(view({ snapshot: null })).slice(0, 4)).toEqual(['5h —', 'wk —', 'ctx —', 'thread —'])
+    expect(texts(view({ snapshot: null, cacheAt: null })).slice(0, 5)).toEqual(['5h —', 'wk —', 'ctx —', 'cache —', 'thread —'])
   })
 
   test('month loading and error', () => {
@@ -83,6 +85,27 @@ describe('segments', () => {
   })
 })
 
+describe('cache warmth', () => {
+  const cache = (minutesAgo: number | null, settings: Partial<Settings> = {}) =>
+    segments(view({ cacheAt: minutesAgo === null ? null : NOW - minutesAgo * MIN }, settings)).find(s => s.key === 'cache')
+
+  test('just written', () => expect(cache(0)?.text).toBe('cache 60m'))
+  test('counts down', () => {
+    expect(cache(18)?.text).toBe('cache 42m')
+    expect(cache(18)?.tone).toBeUndefined()
+  })
+  test('amber under ten minutes', () => {
+    expect(cache(55)?.text).toBe('cache 5m')
+    expect(cache(55)?.tone).toBe('warn')
+  })
+  test('cold after an hour', () => {
+    expect(cache(61)?.text).toBe('cache cold')
+    expect(cache(61)?.tone).toBe('danger')
+  })
+  test('no tone without threshold colors', () => expect(cache(61, { thresholdColors: false })?.tone).toBeUndefined())
+  test('hidden when off', () => expect(cache(18, { cacheWarmth: false })).toBeUndefined())
+})
+
 describe('toneFor', () => {
   test('warn from 70', () => expect(toneFor(72, DEFAULT_SETTINGS)).toBe('warn'))
   test('danger from 90', () => expect(toneFor(95, DEFAULT_SETTINGS)).toBe('danger'))
@@ -94,11 +117,11 @@ describe('toneFor', () => {
 
 describe('fit', () => {
   test('fit drops lowest priority first and keeps buttons', () => {
-    const kept = fit(segments(view()), 100, 20).map(s => s.key)
-    expect(kept).toEqual(['fiveHour', 'weekly', 'context', 'thread'])
+    const kept = fit(segments(view()), 110, 20).map(s => s.key)
+    expect(kept).toEqual(['fiveHour', 'weekly', 'context', 'cache', 'thread'])
   })
 
-  test('everything fits when wide', () => expect(fit(segments(view()), 200, 20)).toHaveLength(6))
+  test('everything fits when wide', () => expect(fit(segments(view()), 200, 20)).toHaveLength(7))
 
   test('nothing fits at zero columns', () => expect(fit(segments(view()), 0, 20)).toEqual([]))
 })

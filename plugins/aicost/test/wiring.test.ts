@@ -29,7 +29,16 @@ async function start($: Engine, on: On, costs: { usd: number }) {
   on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [], cost: { usd: costs.usd } } }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
   await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
+}
+
+async function step($: Engine, agentId?: string) {
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId })) {
+    // drain
+  }
 }
 
 function complete(turnId: string, agentId?: string) {
@@ -74,5 +83,18 @@ describe('wiring', () => {
     const text = await barText($)
     expect(text).toContain('thread $2.00')
     expect(text).not.toContain('(+')
+  })
+
+  test('a main-thread request starts the cache countdown', async ($, on) => {
+    await start($, on, { usd: 0 })
+    expect(await barText($)).toContain('cache —')
+    await step($)
+    expect(await barText($)).toContain('cache 60m')
+  })
+
+  test('subagent requests leave the cache countdown alone', async ($, on) => {
+    await start($, on, { usd: 0 })
+    await step($, 'sub')
+    expect(await barText($)).toContain('cache —')
   })
 })

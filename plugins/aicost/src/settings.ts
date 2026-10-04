@@ -9,6 +9,7 @@ export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
   { key: 'resets', label: 'Reset countdowns' },
   { key: 'contextPercent', label: 'Context %' },
   { key: 'contextTokens', label: 'Context tokens' },
+  { key: 'cacheWarmth', label: 'Cache warmth' },
   { key: 'threadCost', label: 'Thread cost' },
   { key: 'lastTurnCost', label: 'Last-turn cost' },
   { key: 'monthlyCost', label: 'Monthly cost' },

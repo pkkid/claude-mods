@@ -4,7 +4,7 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [⚙]
+5h 42% ·1h12m │ wk 18% ·Thu │ ctx 31% 62k/200k │ cache 42m │ thread $3.12 (+$0.41) │ month $184.20 │ limit ~3:40pm   [Handoff] [⚙]
 ```
 
 | Segment | Meaning |
@@ -12,6 +12,7 @@ cost at Anthropic API list prices.
 | `5h 42% ·1h12m` | 5-hour usage window: percent used, time until it resets |
 | `wk 18% ·Thu` | Weekly window: percent used, the day it resets (hours when under a day) |
 | `ctx 31% 62k/200k` | Context window fill: percent and tokens used / window size |
+| `cache 42m` | How long the prompt cache should stay warm: Claude Code writes the main conversation's cache with a 1-hour TTL, restarted by every request. Amber under 10 minutes, `cache cold` once expired. An estimate from request times; the API does not report cache state, and Anthropic may evict early |
 | `thread $3.12` | This session's cost at API prices |
 | `(+$0.41)` | What the last turn cost (`last $0.41` when thread cost is hidden) |
 | `month $184.20` | This calendar month's Claude Code usage at API prices, across all sessions on this machine |
@@ -23,7 +24,7 @@ session the bar shows the figures from your previous session.
 ## Settings
 
 Press **⚙** to open the checklist and toggle any of: 5-hour usage, weekly usage, reset countdowns, context %, context
-tokens, thread cost, last-turn cost, monthly cost, burn-rate projection, threshold colors, threshold alerts, Handoff
+tokens, cache warmth, thread cost, last-turn cost, monthly cost, burn-rate projection, threshold colors, threshold alerts, Handoff
 button. Choices are saved across sessions. Press **Done** to close it.
 
 Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%, and when context passes 80%.
