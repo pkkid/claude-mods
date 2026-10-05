@@ -56,6 +56,10 @@ above it): done steps marked with a green ✓, the step in progress with a blue 
 In the menu a ● marks the view that is on and a ○ the one that is off; picking the one that is on turns it off, and
 picking the other switches. The choice holds across sessions.
 
+While one is on, its name shows in the status line under the prompt. `/taskview` and `/cleanview` do the same as the
+menu from the prompt: no argument toggles that view (turning it on switches off the other), `on` turns it on and `off`
+turns it off.
+
 ```
 Adding dark mode                                                    3 of 5
 ✓ Read the theme code                                   100% ██████████

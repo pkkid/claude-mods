@@ -53,6 +53,28 @@ const CLEAN_NOTE =
   ' Clean View is on: the person sees only the checklist and your final reply, not your tool calls or anything you ' +
   'write before it. Do not narrate between steps; put what they need in a brief final reply.'
 
+/** The views' names as the menu, the commands and their replies spell them. */
+export const VIEW_NAMES = { task: 'Task View', clean: 'Clean View' } as const
+
+/**
+ * The view after `/taskview` or `/cleanview` with `args`: no argument toggles that view (turning it on replaces the
+ * other), `on` sets it, `off` turns it off if it is the one on; null for anything else.
+ */
+export function nextView(current: ViewMode, view: 'task' | 'clean', args: string): ViewMode | null {
+  const word = args.trim().toLowerCase()
+  if (word === '') {
+    return current === view ? 'off' : view
+  }
+  if (word === 'on') {
+    return view
+  }
+  if (word === 'off') {
+    return current === view ? 'off' : current
+  }
+
+  return null
+}
+
 /** The hidden note a prompt carries while a view is on; null when off. */
 export function viewNote(mode: ViewMode): string | null {
   return mode === 'off' ? null : mode === 'clean' ? TASK_NOTE + CLEAN_NOTE : TASK_NOTE
@@ -148,14 +170,16 @@ type El = Pick<Elements['terminal'], 'Box' | 'Text'>
 const MARKS = { done: '✓', doing: '●', todo: '○' } as const
 /** Done marks green, the step in progress blue (the mod's own shades); steps not started stay dim. */
 const GREEN = '#538d37'
-const BLUE = '#61a9ab'
+const BLUE = '#478487'
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
+/** The step in progress: a grey between dim and full white, so it stands out without glaring. */
+const DOING_TEXT = '#b0b0b0'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
 export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean) {
   const { Box, Text } = el
   if (list === null) {
-    return isWorking ? <Text dimColor>Planning…</Text> : null
+    return null
   }
   const done = list.items.filter(i => i.status === 'done').length
   if (!isWorking && list.items.length > 0 && done === list.items.length) {
@@ -182,7 +206,11 @@ export function renderChecklist(el: El, list: Checklist | null, isWorking: boole
           <Box key={`item-${i}`} flexDirection="row" justifyContent="space-between">
             <Box flexDirection="row" flexShrink={1}>
               <Text color={MARK_COLORS[item.status]} dimColor={item.status === 'todo'}>{`${MARKS[item.status]} `}</Text>
-              <Text bold={item.status === 'doing'} dimColor={item.status !== 'doing'} wrap="truncate-end">
+              <Text
+                color={item.status === 'doing' ? DOING_TEXT : undefined}
+                dimColor={item.status !== 'doing'}
+                wrap="truncate-end"
+              >
                 {item.text}
               </Text>
             </Box>

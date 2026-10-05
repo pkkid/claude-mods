@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
+import { VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
 import { TOGGLES } from './settings'
 import type { MonthTotal, Settings, Snapshot, ToggleKey, ViewMode } from '../types'
@@ -111,8 +112,8 @@ type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 /** The 🛠 menu's view options; picking the one that is on turns it off. */
 const VIEWS = [
-  { mode: 'task', label: 'Task View' },
-  { mode: 'clean', label: 'Clean View' },
+  { mode: 'task', label: VIEW_NAMES.task },
+  { mode: 'clean', label: VIEW_NAMES.clean },
 ] as const
 
 /** How many display options the ⁝ menu puts on one row. */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { addFinal, finalReplies, isFinalReply, parseChecklist, progressBar, stepPercent, viewNote } from '../src/checklist'
+import { addFinal, finalReplies, isFinalReply, nextView, parseChecklist, progressBar, stepPercent, viewNote } from '../src/checklist'
 
 describe('parseChecklist', () => {
   test('reads a title and steps, trimming text', () => {
@@ -39,6 +39,18 @@ describe('progress bars', () => {
     expect(progressBar(40)).toEqual({ filled: '████', empty: '░░░░░░' })
     expect(progressBar(0)).toEqual({ filled: '', empty: '░░░░░░░░░░' })
     expect(progressBar(100, 4)).toEqual({ filled: '████', empty: '' })
+  })
+})
+
+describe('nextView', () => {
+  test('no argument toggles the view, replacing the other; on sets it; off clears only that view', () => {
+    expect(nextView('off', 'clean', '')).toBe('clean')
+    expect(nextView('clean', 'clean', '')).toBe('off')
+    expect(nextView('task', 'clean', '')).toBe('clean')
+    expect(nextView('task', 'clean', ' ON ')).toBe('clean')
+    expect(nextView('clean', 'clean', 'off')).toBe('off')
+    expect(nextView('task', 'clean', 'off')).toBe('task')
+    expect(nextView('off', 'task', 'maybe')).toBeNull()
   })
 })
 

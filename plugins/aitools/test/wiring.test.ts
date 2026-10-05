@@ -297,6 +297,35 @@ describe('wiring', () => {
       await ui.unmount()
     })
 
+    test('/taskview and /cleanview toggle the views and say which is on', async ($, on) => {
+      const run = (command: string, args = '') =>
+        $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+      await start($, on, { usd: 0 })
+      expect((await run('taskview')).text).toBe('Task View on.')
+      expect((await run('cleanview')).text).toBe('Clean View on.')
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tools' })
+      expect((await ui.find({ key: 'clean' }))?.text).toBe('● Clean View')
+      expect((await ui.find({ key: 'task' }))?.text).toBe('○ Task View')
+      await ui.unmount()
+      expect((await run('cleanview')).text).toBe('Clean View off.')
+      expect((await run('taskview', 'on')).text).toBe('Task View on.')
+      expect((await run('taskview', 'off')).text).toBe('Task View off.')
+      expect((await run('taskview', 'bogus')).text).toBe('Usage: /taskview [on|off] (no argument toggles Task View)')
+    })
+
+    test('the status line names the view that is on and clears when both are off', async ($, on) => {
+      const statuses: (string | undefined)[] = []
+      on('ui.status', (_, e) => {
+        statuses.push(e.text)
+        return { value: undefined }
+      })
+      await start($, on, { usd: 0 }, { viewMode: 'task' })
+      await pickView($, 'clean')
+      await pickView($, 'clean')
+      expect(statuses).toEqual(['Task View', 'Clean View', undefined])
+    })
+
     test('a saved view comes back in a new session', async ($, on) => {
       await start($, on, { usd: 0 }, { viewMode: 'clean' })
       const ui = await $.ui.mount(band())
@@ -346,13 +375,15 @@ describe('wiring', () => {
       const marks = texts.filter(t => ['✓ ', '● ', '○ '].includes(t.text))
       expect(marks.map(m => [m.text, m.props.color ?? null, m.props.dimColor ?? false])).toEqual([
         ['✓ ', '#538d37', false],
-        ['● ', '#61a9ab', false],
+        ['● ', '#478487', false],
         ['○ ', null, true],
       ])
+      const doing = texts.find(t => t.text === 'Add the tokens')
+      expect([doing?.props.color, doing?.props.bold ?? false, doing?.props.dimColor ?? false]).toEqual(['#b0b0b0', false, false])
       const fills = texts.filter(t => /^█+$/.test(t.text))
       expect(fills.map(f => [f.text, f.props.color ?? null])).toEqual([
         ['██████████', '#538d37'],
-        ['████', '#61a9ab'],
+        ['████', '#478487'],
       ])
     })
 

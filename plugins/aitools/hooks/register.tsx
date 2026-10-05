@@ -4,7 +4,18 @@ import type { EngineInterface, Register } from 'claude-code'
 import { EMPTY_ALERTS, checkAlerts } from '../src/alerts'
 import type { AlertState } from '../src/alerts'
 import { renderBar } from '../src/bar'
-import { CHECKLIST_SPEC, CHECKLIST_TOOL_ID, addFinal, finalReplies, isFinalReply, parseChecklist, renderChecklist, viewNote } from '../src/checklist'
+import {
+  CHECKLIST_SPEC,
+  CHECKLIST_TOOL_ID,
+  VIEW_NAMES,
+  addFinal,
+  finalReplies,
+  isFinalReply,
+  nextView,
+  parseChecklist,
+  renderChecklist,
+  viewNote,
+} from '../src/checklist'
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
@@ -235,6 +246,24 @@ async function setView($: EngineInterface, mode: ViewMode): Promise<void> {
   await update($, isToolsOpen, () => false)
   await update($, viewMode, () => mode)
   await $.store.set('viewMode', mode)
+  showViewStatus($, mode)
+}
+
+/** Names the view that is on in the status line under the prompt; clears it when both are off. */
+function showViewStatus($: EngineInterface, mode: ViewMode): void {
+  $.ui.status(mode === 'off' ? undefined : VIEW_NAMES[mode])
+}
+
+/** /taskview and /cleanview: toggles the view, or sets it with on/off, and says what is on now. */
+async function viewCommand($: EngineInterface, view: 'task' | 'clean', args: string): Promise<{ text: string }> {
+  const name = VIEW_NAMES[view]
+  const mode = nextView(await read($, viewMode), view, args)
+  if (mode === null) {
+    return { text: `Usage: /${view}view [on|off] (no argument toggles ${name})` }
+  }
+  await setView($, mode)
+
+  return { text: mode === 'off' ? `${name} off.` : `${VIEW_NAMES[mode]} on.` }
 }
 
 /** Draws nothing in a transcript row's place: how Clean View hides tool calls and in-progress replies. */
@@ -342,10 +371,14 @@ export const register: Register = on => {
     await update($, isHidden, () => hidden)
     await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar', argumentHint: '[on|off]' })
     const savedView = await $.store.get('viewMode')
-    await update($, viewMode, () => (savedView === 'task' || savedView === 'clean' ? savedView : 'off'))
+    const view: ViewMode = savedView === 'task' || savedView === 'clean' ? savedView : 'off'
+    await update($, viewMode, () => view)
+    showViewStatus($, view)
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back.
     const earlier = finalReplies(await $.session.messages().catch(() => []))
     await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
+    await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
+    await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
     // Last, and caught: without the checklist tool the views still hide rows and the bar still runs.
@@ -408,6 +441,9 @@ export const register: Register = on => {
 
     return { text: hidden ? 'aitools bar hidden. Run /aitools to show it.' : 'aitools bar shown.' }
   })
+
+  on('command.run', { command: 'taskview' }, ($, e) => viewCommand($, 'task', e.args))
+  on('command.run', { command: 'cleanview' }, ($, e) => viewCommand($, 'clean', e.args))
 
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
