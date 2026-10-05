@@ -122,7 +122,7 @@ export const BAR_CELLS = 10
 export function progressBar(percent: number, cells = BAR_CELLS): { filled: string; empty: string } {
   const n = Math.round((clampPercent(percent) / 100) * cells)
 
-  return { filled: '█'.repeat(n), empty: '░'.repeat(cells - n) }
+  return { filled: '▰'.repeat(n), empty: '▱'.repeat(cells - n) }
 }
 
 /** Whether Clean View shows an assistant text block: only one that is part of a finished turn's final reply. */

@@ -358,9 +358,9 @@ describe('wiring', () => {
       const text = await barText($)
       expect(text).toContain('Dark mode')
       expect(text).toContain('1 of 3')
-      expect(text).toContain('● Add the tokens 40% ████░░░░░░')
-      expect(text).toContain('○ Run the checks  0% ░░░░░░░░░░')
-      expect(text).toContain('✓ Read the theme100% ██████████')
+      expect(text).toContain('● Add the tokens 40% ▰▰▰▰▱▱▱▱▱▱')
+      expect(text).toContain('○ Run the checks  0% ▱▱▱▱▱▱▱▱▱▱')
+      expect(text).toContain('✓ Read the theme100% ▰▰▰▰▰▰▰▰▰▰')
     })
 
     test('the checklist sits below the bar with green, blue and dim marks', async ($, on) => {
@@ -380,10 +380,10 @@ describe('wiring', () => {
       ])
       const doing = texts.find(t => t.text === 'Add the tokens')
       expect([doing?.props.color, doing?.props.bold ?? false, doing?.props.dimColor ?? false]).toEqual(['#b0b0b0', false, false])
-      const fills = texts.filter(t => /^█+$/.test(t.text))
+      const fills = texts.filter(t => /^▰+$/.test(t.text))
       expect(fills.map(f => [f.text, f.props.color ?? null])).toEqual([
-        ['██████████', '#538d37'],
-        ['████', '#478487'],
+        ['▰▰▰▰▰▰▰▰▰▰', '#538d37'],
+        ['▰▰▰▰', '#478487'],
       ])
     })
 

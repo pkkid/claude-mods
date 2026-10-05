@@ -62,11 +62,11 @@ turns it off.
 
 ```
 Adding dark mode                                                    3 of 5
-✓ Read the theme code                                   100% ██████████
-✓ Add the color tokens                                  100% ██████████
-● Wire up the toggle                                     40% ████░░░░░░
-○ Update tests                                            0% ░░░░░░░░░░
-○ Run checks                                              0% ░░░░░░░░░░
+✓ Read the theme code                                   100% ▰▰▰▰▰▰▰▰▰▰
+✓ Add the color tokens                                  100% ▰▰▰▰▰▰▰▰▰▰
+● Wire up the toggle                                     40% ▰▰▰▰▱▱▱▱▱▱
+○ Update tests                                            0% ▱▱▱▱▱▱▱▱▱▱
+○ Run checks                                              0% ▱▱▱▱▱▱▱▱▱▱
 ```
 
 Each step has a bar: full once done, empty until it starts, and for the step in progress Claude's own estimate of how
