@@ -4,18 +4,20 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-AI Tools    5h 42% ·1h12m    wk 18% ·Thu    ctx 31% 62k/200k    cache 42m    thread $3.12 (+$0.41)    month $184.20    limit ~3:40pm   [🛠] [⁝]
+AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k)    cache 42m    thread $3.12 (+$0.41)    month $184.20    limit ~3:40pm   [🛠] [⁝]
 ```
 
 | Segment | Meaning |
 |---|---|
 | `AI Tools` | A dim label naming the bar |
-| `5h 42% ·1h12m` | 5-hour usage window: percent used, time until it resets |
-| `wk 18% ·Thu` | Weekly window: percent used, the day it resets (hours when under a day) |
+| `5h 42%, 1h12m` | 5-hour usage window: percent used, time until it resets |
+| `wk 18%, Thu` | Weekly window: percent used, the day it resets (hours when under a day) |
 | `ctx 31% 62k/200k` | Context window fill: percent and tokens used / window size |
+| `tok 1.3M (+48k)` | Tokens: this thread's total this month (its helpers' included) and the last turn's, counting input, output and prompt-cache reads and writes |
 | `cache 42m` | How long the prompt cache should stay warm: Claude Code writes the main conversation's cache with a 1-hour TTL, restarted by every request. Amber under 10 minutes, `cache cold` once expired. An estimate from request times; the API does not report cache state, and Anthropic may evict early |
 | `thread $3.12` | This session's cost at API prices |
 | `(+$0.41)` | What the last turn cost (`last $0.41` when thread cost is hidden) |
+| `~2.1% wk (+0.03%)` | Thread cost %: the thread's and the last turn's estimated share of your weekly allowance (see below) |
 | `month $184.20` | This calendar month's Claude Code usage at API prices, across all sessions on this machine |
 | `limit ~3:40pm` | At your pace over the last hour, when the 5-hour window would run out; shown only if before it resets |
 
@@ -30,11 +32,10 @@ sessions. `/handoff` works either way.
 ## Settings
 
 Press **⁝** to open the options above the bar, five to a row, and toggle any of: the AI Tools label, 5-hour usage,
-weekly usage, reset countdowns, context %, context tokens, cache warmth, thread cost, last-turn cost, monthly cost,
-burn-rate projection, threshold colors, threshold alerts, Tools menu. Changes show in the bar right away and are saved
-across sessions. Press **⁝** again to close it; opening it closes the **🛠** menu, and the other way round.
-
-Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%, and when context passes 80%.
+weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, thread cost,
+last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
+Changes show in the bar right away and are saved across sessions. Press **⁝** again to close it; opening it closes the
+**🛠** menu, and the other way round.
 
 ## Handoff
 
@@ -96,7 +97,7 @@ it. It stays open until you close it, and comes back after the mod reloads. Whil
 not on screen (the status line then reads `Agent Dock (not shown)`), nothing below applies.
 
 ```
-Team size: ○ 1 ○ 3 ● 5 ○ 10 ○ 20 ○ 30   Helpers: ● Fast & cheap ○ Same as chat
+Team size: ○ 1 ○ 3 ● 5 ○ 10 ○ 20 ○ 30   Helpers: ● Same as chat ○ Fast & cheap
 
 5 agents · 3 working · 2 idle · 1 queued · 1 done
 ● Research business licenses · Reading the city site               40% ▰▰▰▰▱▱▱▱▱▱  1:20
@@ -105,8 +106,8 @@ Team size: ○ 1 ○ 3 ● 5 ○ 10 ○ 20 ○ 30   Helpers: ● Fast & cheap �
 
 - **Team**: how many helpers may run at once (1, 3, 5, 10, 20 or 30). Past 10 the dock warns in yellow that a big team
   uses your Claude usage much faster.
-- **Helpers**: **Fast & cheap** runs every helper request on Sonnet 5.5 at low reasoning; **Same as chat** uses the
-  chat's model and reasoning level.
+- **Helpers**: **Same as chat** (the default) uses the chat's model and reasoning level; **Fast & cheap** runs every
+  helper request on Sonnet 5.5 at low reasoning.
 - While the dock is open, each prompt carries a hidden note asking Claude to split a job with separate parts across
   the team, starting the pieces in parallel. Each helper's prompt asks it to report what it is doing and how far along
   it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`), which fills its card.
@@ -117,6 +118,15 @@ Team size: ○ 1 ○ 3 ● 5 ○ 10 ○ 20 ○ 30   Helpers: ● Fast & cheap �
   and Claude has replied, a line under the cards says how long they took (`All 3 helpers finished in 6 to 10 seconds
   each.`). The cards and that line stay until your next prompt.
 - The team and helper picks are saved; the dock itself starts closed in a new session.
+
+## How thread cost % is estimated
+
+The usage figures only report the weekly window as a percent, so the mod estimates what 1% of the week costs: this
+machine's spend at API prices since the window opened (its reset time less 7 days) divided by the weekly percent used.
+The thread's cost and the last turn's are then shown as shares of that, marked `~`. Usage on other machines or in
+claude.ai's chat counts toward your weekly percent but not toward this machine's spend, which makes the shares read low;
+the estimate also assumes the allowance is charged roughly in line with API prices. Hourly costs for the last 8 days are
+kept alongside the monthly scan for this.
 
 ## How monthly cost is computed
 

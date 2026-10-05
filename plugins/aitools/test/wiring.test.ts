@@ -167,6 +167,13 @@ describe('wiring', () => {
     expect(await barText($)).toContain('thread $3.00 (+$2.00)')
   })
 
+  test("the last turn's tokens show on the bar once it completes", async ($, on) => {
+    await start($, on, { usd: 0 })
+    const usage = { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0 }
+    await $.turn.complete({ ...complete('t1'), usage: { ...usage, model: 'claude-opus-5-5' } })
+    expect(await barText($)).toContain('tok — (+12k)')
+  })
+
   test('/handoff prints the brief to the chat and copies it, writing no file', async ($, on) => {
     const brief = '## Goal\nShip aitools\n\n## Next step\nMerge'
     const writes: string[] = []
@@ -507,21 +514,23 @@ describe('wiring', () => {
 
     test('/agentdock opens the dock pane; the team and helper picks show with a warning past 10', async ($, on) => {
       const panes = await start($, on, { usd: 0 })
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 5 Fast & cheap helpers.')
+      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 5 Same as chat helpers.')
       expect(panes.open.has('agentdock')).toBe(true)
       const ui = await $.ui.mount({ ...DOCK, requestId: 'agentdock' })
       expect((await ui.find({ key: 'team-5' }))?.text).toBe('● 5')
-      expect((await ui.find({ key: 'helpers-fast' }))?.text).toBe('● Fast & cheap')
+      expect((await ui.find({ key: 'helpers-same' }))?.text).toBe('● Same as chat')
+      const order = (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith('helpers-'))
+      expect(order).toEqual(['helpers-same', 'helpers-fast'])
       expect(await ui.find({ text: /uses your Claude usage much faster/ })).toBeUndefined()
       await ui.press({ key: 'team-20' })
-      await ui.press({ key: 'helpers-same' })
+      await ui.press({ key: 'helpers-fast' })
       expect((await ui.find({ key: 'team-20' }))?.text).toBe('● 20')
-      expect((await ui.find({ key: 'helpers-same' }))?.text).toBe('● Same as chat')
+      expect((await ui.find({ key: 'helpers-fast' }))?.text).toBe('● Fast & cheap')
       expect(await ui.find({ text: '⚠ A team of 20 uses your Claude usage much faster.' })).toBeDefined()
       await ui.unmount()
       expect((await run($, 'agentdock')).text).toBe('Agent Dock closed.')
       expect(panes.open.has('agentdock')).toBe(false)
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 20 Same as chat helpers.')
+      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 20 Fast & cheap helpers.')
     })
 
     test('the 🛠 menu opens and closes the dock, marking it ● while open', async ($, on) => {
@@ -597,7 +606,7 @@ describe('wiring', () => {
       const seen: { model?: string; prompt: string }[] = []
       const steps: Step[] = []
       coreSpawn(on, seen)
-      await start($, on, { usd: 0 }, { agentTeam: 1 }, [], steps)
+      await start($, on, { usd: 0 }, { agentTeam: 1, agentHelpers: 'fast' }, [], steps)
       expect((await spawn($, 'Ignored', 'outside')).model).toBe('parent')
       await run($, 'agentdock')
       const first = await spawn($, 'Licenses', 'Research licenses')
@@ -675,7 +684,7 @@ describe('wiring', () => {
         await gate
         return { model: e.model ?? 'parent', agentId: 'agent-1' }
       })
-      await start($, on, { usd: 0 }, {}, [], steps)
+      await start($, on, { usd: 0 }, { agentHelpers: 'fast' }, [], steps)
       await run($, 'agentdock')
       // The helper's first request goes out while its start is still being recorded.
       const spawning = spawn($, 'Licenses')

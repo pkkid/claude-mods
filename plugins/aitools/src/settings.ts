@@ -10,14 +10,15 @@ export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
   { key: 'resets', label: 'Reset countdowns' },
   { key: 'contextPercent', label: 'Context %' },
   { key: 'contextTokens', label: 'Context tokens' },
+  { key: 'threadTokens', label: 'Thread tokens' },
+  { key: 'lastTurnTokens', label: 'Last-turn tokens' },
   { key: 'cacheWarmth', label: 'Cache warmth' },
   { key: 'threadCost', label: 'Thread cost' },
   { key: 'lastTurnCost', label: 'Last-turn cost' },
+  { key: 'threadPercent', label: 'Thread cost %' },
   { key: 'monthlyCost', label: 'Monthly cost' },
   { key: 'burnRate', label: 'Burn-rate projection' },
   { key: 'thresholdColors', label: 'Threshold colors' },
-  { key: 'thresholdAlerts', label: 'Threshold alerts' },
-  { key: 'handoffButton', label: 'Tools menu' },
 ]
 
 export const DEFAULT_SETTINGS: Settings = Object.fromEntries(TOGGLES.map(t => [t.key, true])) as Settings

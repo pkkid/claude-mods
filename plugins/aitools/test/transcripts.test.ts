@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { MAX_READ, monthKey, monthStart, parseChunk, scanMonth, sessionUsd } from '../src/transcripts'
+import { MAX_READ, monthKey, monthStart, parseChunk, scanMonth, sessionTokens, sessionUsd, usageTokens, usdSince } from '../src/transcripts'
 import type { ScanCache, ScanEntry, ScanIO } from '../src/transcripts'
 
 const M = 1_000_000
@@ -114,6 +114,40 @@ describe('parseChunk', () => {
 
 describe('scanMonth', () => {
   const ROOT = '/home/u/.claude/projects'
+  const HOUR = 60 * 60_000
+
+  test('hourly costs reach back 8 days into last month without counting toward the month', async () => {
+    const early = new Date(2026, 9, 3, 12, 0).getTime()
+    const recent = new Date(2026, 8, 28, 9, 0)
+    const old = new Date(2026, 8, 20, 9, 0)
+    const { io } = fakeIO({
+      [`${ROOT}/p/s.jsonl`]: {
+        text: [
+          row('a', { input_tokens: M }, { ts: recent.toISOString() }),
+          row('b', { input_tokens: M }, { ts: old.toISOString() }),
+          row('c', { output_tokens: M }, { ts: new Date(2026, 9, 2, 9, 0).toISOString() }),
+        ].join('\n') + '\n',
+        mtimeMs: early,
+      },
+    })
+    const r = await scanMonth(io, ROOT, null, early)
+    expectClose(r.usd, 20)
+    expectClose(usdSince(r.hours, recent.getTime()), 24)
+    expectClose(usdSince(r.hours, recent.getTime() + HOUR), 20)
+    expect(Object.keys(r.hours ?? {})).toHaveLength(2)
+  })
+
+  test('a cache from before version 2 is read again so its hours and tokens fill in', async () => {
+    const path = `${ROOT}/proj/s1.jsonl`
+    const { io, calls } = fakeIO({ [path]: { text: `${row('a', { input_tokens: M })}\n` } })
+    const first = await scanMonth(io, ROOT, null, NOW)
+    const { hours: _, version: __, ...older } = first
+    calls.readBytes.length = 0
+    const again = await scanMonth(io, ROOT, older, NOW)
+    expect(calls.readBytes).toEqual([path])
+    expectClose(usdSince(again.hours, 0), 4)
+    expectClose(again.usd, 4)
+  })
 
   test('scanMonth incremental', async () => {
     const path = `${ROOT}/proj/s1.jsonl`
@@ -222,5 +256,25 @@ describe('scanMonth', () => {
     const cache = await scanMonth(io, ROOT, null, NOW)
     expectClose(sessionUsd(cache, 'abc') ?? -1, 8)
     expect(sessionUsd(cache, 'nope')).toBeUndefined()
+  })
+})
+
+describe('tokens', () => {
+  test('a response uses its input, output and cache reads and writes', () => {
+    const usage = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 4 }
+    expect(usageTokens({ ...usage, cache_creation: { ephemeral_5m_input_tokens: 4 } })).toBe(334)
+    expect(usageTokens({ output_tokens: 7 })).toBe(7)
+  })
+
+  test("a session's tokens add up its own file and its helpers', and nothing else", async () => {
+    const ROOT = '/home/u/.claude/projects'
+    const { io } = fakeIO({
+      [`${ROOT}/p/s1.jsonl`]: { text: `${row('a', { input_tokens: 100, output_tokens: 20 })}\n` },
+      [`${ROOT}/p/s1/subagents/h.jsonl`]: { text: `${row('b', { cache_read_input_tokens: 1000 })}\n` },
+      [`${ROOT}/p/s2.jsonl`]: { text: `${row('c', { input_tokens: 5 })}\n` },
+    })
+    const cache = await scanMonth(io, ROOT, null, NOW)
+    expect(sessionTokens(cache, 's1')).toBe(1120)
+    expect(sessionTokens(cache, 's9')).toBeUndefined()
   })
 })

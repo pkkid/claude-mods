@@ -5,14 +5,15 @@ export type ToggleKey =
   | 'resets'
   | 'contextPercent'
   | 'contextTokens'
+  | 'threadTokens'
+  | 'lastTurnTokens'
   | 'cacheWarmth'
   | 'threadCost'
   | 'lastTurnCost'
+  | 'threadPercent'
   | 'monthlyCost'
   | 'burnRate'
   | 'thresholdColors'
-  | 'thresholdAlerts'
-  | 'handoffButton'
 
 export type Settings = Record<ToggleKey, boolean>
 
@@ -26,6 +27,10 @@ export type Snapshot = {
   context?: ContextFill
   threadUsd?: number
   lastTurnUsd?: number
+  /** Every token the thread's responses used this month, its helpers' included, from the transcript scan. */
+  threadTokens?: number
+  /** Every token the last main-thread turn used. */
+  lastTurnTokens?: number
 }
 
 /** The handoff pane's content: the brief being written, the brief itself, or why there is none. */
@@ -60,7 +65,13 @@ export type AgentCard = {
 /** The helpers started for the current request, and pieces waiting for a free one. */
 export type AgentRun = { startedAt: number; cards: AgentCard[]; queued: string[]; isReported?: boolean }
 
-export type MonthTotal = { usd: number; isEstimate: boolean; status: 'loading' | 'ready' | 'error' }
+export type MonthTotal = {
+  usd: number
+  isEstimate: boolean
+  status: 'loading' | 'ready' | 'error'
+  /** Cost per hour (key: hours since the epoch) over the last 8 days, for the weekly window's total. */
+  hours?: Record<string, number>
+}
 
 declare module 'claude-code' {
   interface PluginState {

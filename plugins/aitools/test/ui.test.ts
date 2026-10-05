@@ -69,7 +69,7 @@ describe('AbovePrompt band', () => {
       rows.push(await ui.find({ key: `settings-row-${i}` }))
     }
     await ui.unmount()
-    expect(rows.map(r => r?.children.length)).toEqual([5, 5, 4])
+    expect(rows.map(r => r?.children.length)).toEqual([5, 5, 5])
   })
 
   test('the AI Tools label shows by default', async ($, on) => {
@@ -110,14 +110,16 @@ describe('AbovePrompt band', () => {
     await ui.unmount()
   })
 
-  test('tools menu follows its toggle', async ($, on) => {
+  test('the tools button always shows, even with a saved setting from when it could be hidden', async ($, on) => {
     coreBand(on)
     mock.store(on, { settings: { handoffButton: false } })
     mock.clock(on, { now: NOW })
     on('session.start', (_, e) => ({ cwd: e.cwd }))
     await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount(band('desktop'))
-    expect(await ui.find({ key: 'tools' })).toBeUndefined()
+    expect(await ui.find({ key: 'tools' })).toBeDefined()
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ text: /Tools menu/ })).toBeUndefined()
     await ui.unmount()
   })
 

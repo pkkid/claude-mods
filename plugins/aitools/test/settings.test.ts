@@ -13,12 +13,15 @@ function memoryStore(entries: Record<string, unknown> = {}): KeyStore {
 }
 
 describe('settings', () => {
-  test('fourteen toggles in order', () => {
-    expect(TOGGLES).toHaveLength(14)
+  test('fifteen toggles in order', () => {
+    expect(TOGGLES).toHaveLength(15)
     expect(TOGGLES[0]?.key).toBe('label')
     expect(TOGGLES[1]?.key).toBe('fiveHour')
-    expect(TOGGLES[6]?.key).toBe('cacheWarmth')
-    expect(TOGGLES[13]?.key).toBe('handoffButton')
+    expect(TOGGLES[6]?.key).toBe('threadTokens')
+    expect(TOGGLES[7]?.key).toBe('lastTurnTokens')
+    expect(TOGGLES[8]?.key).toBe('cacheWarmth')
+    expect(TOGGLES[11]?.key).toBe('threadPercent')
+    expect(TOGGLES[14]?.key).toBe('thresholdColors')
   })
 
   test('all default to on', () => {

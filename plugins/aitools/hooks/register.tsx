@@ -1,8 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { EMPTY_ALERTS, checkAlerts } from '../src/alerts'
-import type { AlertState } from '../src/alerts'
 import {
   FAST_EFFORT,
   FAST_MODEL,
@@ -39,7 +37,7 @@ import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
 import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
-import { scanMonth, sessionUsd } from '../src/transcripts'
+import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
 import type { Brief, HelperMode, LimitWindow, Snapshot, TeamSize, ViewMode } from '../types'
 
@@ -63,7 +61,7 @@ const checklist = atom({ plugin: 'aitools', key: 'checklist' } as const, null)
 const finals = atom({ plugin: 'aitools', key: 'finals' } as const, [])
 const isDockOpen = atom({ plugin: 'aitools', key: 'isDockOpen' } as const, false)
 const team = atom({ plugin: 'aitools', key: 'team' } as const, 5)
-const helpers = atom({ plugin: 'aitools', key: 'helpers' } as const, 'fast')
+const helpers = atom({ plugin: 'aitools', key: 'helpers' } as const, 'same')
 const agentRun = atom({ plugin: 'aitools', key: 'agentRun' } as const, null)
 const mainEffort = atom({ plugin: 'aitools', key: 'mainEffort' } as const, null)
 const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
@@ -149,10 +147,14 @@ async function scan($: EngineInterface): Promise<void> {
       const next = await scanMonth(scanIO($), await projectsRoot($), await readCache($), await $.clock.now())
       memoryCache = next
       await $.store.set('scanCache', next).catch((err: unknown) => logScanError($, err))
-      await update($, month, () => ({ usd: next.usd, isEstimate: next.isEstimate, status: 'ready' as const }))
+      await update($, month, () => ({ usd: next.usd, isEstimate: next.isEstimate, status: 'ready' as const, hours: next.hours }))
+      const threadTokens = sessionTokens(next, await $.session.id())
+      if (threadTokens !== undefined) {
+        await update($, snapshot, snap => ({ ...(snap ?? {}), threadTokens }))
+      }
     } while (isScanPending)
   } catch (err) {
-    await update($, month, m => ({ usd: m?.usd ?? 0, isEstimate: m?.isEstimate ?? false, status: 'error' as const }))
+    await update($, month, m => ({ ...m, usd: m?.usd ?? 0, isEstimate: m?.isEstimate ?? false, status: 'error' as const }))
     logScanError($, err)
   } finally {
     isScanning = false
@@ -498,6 +500,8 @@ async function measure($: EngineInterface, e: { rateLimits: readonly { kind: str
     context: e.context.tokens === undefined ? (previous?.context ?? e.context) : e.context,
     threadUsd: e.cost?.usd ?? fallback,
     lastTurnUsd: previous?.lastTurnUsd,
+    threadTokens: previous?.threadTokens,
+    lastTurnTokens: previous?.lastTurnTokens,
   }
   await update($, snapshot, () => snap)
   await $.store.set('lastSnapshot', snap)
@@ -509,15 +513,6 @@ async function measure($: EngineInterface, e: { rateLimits: readonly { kind: str
     await $.store.set('burn', burn)
   }
   await update($, projection, () => project(burn, now))
-
-  if (normalizeSettings(await read($, settings)).thresholdAlerts) {
-    const alertState = ((await $.store.get('alerts')) as AlertState | undefined) ?? EMPTY_ALERTS
-    const { state, alerts } = checkAlerts(alertState, snap)
-    await $.store.set('alerts', state)
-    for (const text of alerts) {
-      $.ui.toast(text)
-    }
-  }
 }
 
 export const register: Register = on => {
@@ -554,7 +549,7 @@ export const register: Register = on => {
     const savedTeam = await $.store.get('agentTeam')
     const savedHelpers = await $.store.get('agentHelpers')
     await update($, team, () => (isTeamSize(savedTeam) ? savedTeam : 5))
-    await update($, helpers, () => (savedHelpers === 'same' ? 'same' : 'fast'))
+    await update($, helpers, () => (savedHelpers === 'fast' ? 'fast' : 'same'))
     await $.command.register({ name: 'agentdock', description: 'Open or close the Agent Dock' })
     // A reload starts the module's bookkeeping over: the running cards are the helpers still at work.
     liveHelpers.clear()
@@ -630,6 +625,10 @@ export const register: Register = on => {
     const baseline = await read($, turnBaseline)
     const base = baseline?.turnId === e.turnId ? baseline.usd : undefined
     await update($, turnBaseline, () => null)
+    if (e.usage !== undefined) {
+      const lastTurnTokens = usageTokens(e.usage)
+      await update($, snapshot, snap => ({ ...(snap ?? {}), lastTurnTokens }))
+    }
     const cost = (await $.session.usage()).cost?.usd
     if (cost !== undefined) {
       const lastTurnUsd = base === undefined ? undefined : cost - base

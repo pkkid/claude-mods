@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
+import { usdSince } from './transcripts'
 import { VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
 import { TOGGLES } from './settings'
@@ -59,6 +60,68 @@ function monthText(month: MonthTotal): string {
   return month.status === 'error' ? 'month ?' : `month ${usd(month.usd, month.isEstimate)}`
 }
 
+const WEEK_MS = 7 * 24 * 60 * 60_000
+
+/**
+ * What 1% of the weekly allowance costs at API prices, estimated: this machine's spend since the weekly window opened
+ * (its reset time less 7 days) over the weekly percent used. Null until both are known and above zero.
+ */
+export function usdPerWeeklyPercent(snapshot: Snapshot | null, month: MonthTotal): number | null {
+  const weekly = snapshot?.weekly
+  if (!weekly?.resetsAt || !(weekly.percentUsed > 0) || month.hours === undefined) {
+    return null
+  }
+  const spent = usdSince(month.hours, Date.parse(weekly.resetsAt) - WEEK_MS)
+
+  return spent > 0 ? spent / weekly.percentUsed : null
+}
+
+/** A share of the weekly allowance, with as many decimals as small shares need: `12%`, `2.1%`, `0.04%`, `<0.01%`. */
+export function percentText(pct: number): string {
+  if (pct < 0.01) {
+    return '<0.01%'
+  }
+
+  return `${pct >= 10 ? Math.round(pct) : pct >= 1 ? pct.toFixed(1) : pct.toFixed(2)}%`
+}
+
+/** The thread segment: its cost and the last turn's, each followed by its estimated share of the week when asked. */
+function threadSegment(view: View): Segment | null {
+  const { snapshot, settings: on } = view
+  const thread = snapshot?.threadUsd
+  const last = snapshot?.lastTurnUsd
+  const perPercent = on.threadPercent ? usdPerWeeklyPercent(snapshot, view.month) : null
+  const share = (spent: number | undefined) =>
+    perPercent === null || spent === undefined ? null : `~${percentText(spent / perPercent)}`
+  const threadShare = share(thread)
+  const lastShare = on.lastTurnCost ? share(last) : null
+
+  if (on.threadCost) {
+    const turn = on.lastTurnCost && last !== undefined ? ` (+${usd(last)})` : ''
+    const pct = threadShare === null ? '' : ` ${threadShare} wk${lastShare === null ? '' : ` (+${lastShare.slice(1)})`}`
+    return { key: 'thread', text: `thread ${thread === undefined ? DASH : usd(thread)}${turn}${pct}` }
+  }
+  if (on.lastTurnCost) {
+    return { key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}${lastShare === null ? '' : ` ${lastShare} wk`}` }
+  }
+  if (threadShare !== null) {
+    return { key: 'thread', text: `thread ${threadShare} wk` }
+  }
+
+  return null
+}
+
+/** The token segment: the thread's total and the last turn's in parentheses, as the cost segment shows dollars. */
+function tokenSegment(snapshot: Snapshot | null, on: Settings): Segment {
+  const count = (n: number | undefined) => (n === undefined ? DASH : tokens(n))
+  if (on.threadTokens) {
+    const turn = on.lastTurnTokens && snapshot?.lastTurnTokens !== undefined ? ` (+${tokens(snapshot.lastTurnTokens)})` : ''
+    return { key: 'tokens', text: `tok ${count(snapshot?.threadTokens)}${turn}` }
+  }
+
+  return { key: 'tokens', text: `last tok ${count(snapshot?.lastTurnTokens)}` }
+}
+
 export function segments(view: View): Segment[] {
   const { snapshot, settings: on, now } = view
   const segs: Segment[] = []
@@ -68,11 +131,11 @@ export function segments(view: View): Segment[] {
   const pct = (n: number | undefined) => (n === undefined ? DASH : `${Math.round(n)}%`)
 
   if (on.fiveHour) {
-    const reset = on.resets && fiveHour?.resetsAt ? ` ·${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
+    const reset = on.resets && fiveHour?.resetsAt ? `, ${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
     segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on) })
   }
   if (on.weekly) {
-    const reset = on.resets && weekly?.resetsAt ? ` ·${weeklyReset(weekly.resetsAt, now)}` : ''
+    const reset = on.resets && weekly?.resetsAt ? `, ${weeklyReset(weekly.resetsAt, now)}` : ''
     segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on) })
   }
   if (on.contextPercent || on.contextTokens) {
@@ -87,16 +150,15 @@ export function segments(view: View): Segment[] {
     }
     segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on) })
   }
+  if (on.threadTokens || on.lastTurnTokens) {
+    segs.push(tokenSegment(snapshot, on))
+  }
   if (on.cacheWarmth) {
     segs.push(cacheSegment(view.cacheAt, now, on))
   }
-  const last = snapshot?.lastTurnUsd
-  if (on.threadCost) {
-    const thread = snapshot?.threadUsd === undefined ? DASH : usd(snapshot.threadUsd)
-    const turn = on.lastTurnCost && last !== undefined ? ` (+${usd(last)})` : ''
-    segs.push({ key: 'thread', text: `thread ${thread}${turn}` })
-  } else if (on.lastTurnCost) {
-    segs.push({ key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}` })
+  const threadSeg = threadSegment(view)
+  if (threadSeg !== null) {
+    segs.push(threadSeg)
   }
   if (on.monthlyCost) {
     segs.push({ key: 'month', text: monthText(view.month) })
@@ -166,7 +228,7 @@ export function renderBar(
         ))}
       </Box>
       <Box flexDirection="row" gap={0} flexShrink={0}>
-        {view.settings.handoffButton && <Button key="tools" label="🛠" {...QUIET} onPress={() => on.toggleTools()} />}
+        <Button key="tools" label="🛠" {...QUIET} onPress={() => on.toggleTools()} />
         <Button key="settings" label="⁝" {...QUIET} onPress={() => on.toggleSettings()} />
       </Box>
     </Box>
@@ -189,7 +251,7 @@ export function renderBar(
         ))}
       </Box>
     )
-  } else if (flags.isToolsOpen && view.settings.handoffButton) {
+  } else if (flags.isToolsOpen) {
     menu = (
       <Box flexDirection="row" justifyContent="flex-end" gap={0}>
         <Button

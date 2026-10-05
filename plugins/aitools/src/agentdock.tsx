@@ -7,7 +7,7 @@ import { elapsed } from './format'
 export const TEAM_SIZES = [1, 3, 5, 10, 20, 30] as const
 /** Teams larger than this get a warning: they use Claude usage much faster. */
 export const LARGE_TEAM = 10
-export const HELPER_LABELS = { fast: 'Fast & cheap', same: 'Same as chat' } as const
+export const HELPER_LABELS = { same: 'Same as chat', fast: 'Fast & cheap' } as const
 /** What Fast & cheap helpers run on, and how hard they think. */
 export const FAST_MODEL = 'claude-sonnet-5-5'
 export const FAST_EFFORT = 'low'
@@ -168,7 +168,7 @@ export function renderDock(
         </Box>
         <Box flexDirection="row" columnGap={1}>
           <Text dimColor>Helpers:</Text>
-          {(['fast', 'same'] as const).map(mode => (
+          {(['same', 'fast'] as const).map(mode => (
             <Button
               key={`helpers-${mode}`}
               label={`${helpers === mode ? '●' : '○'} ${HELPER_LABELS[mode]}`}
