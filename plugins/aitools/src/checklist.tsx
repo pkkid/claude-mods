@@ -142,7 +142,7 @@ export function addFinal(finals: readonly string[], answer: string, keep = FINAL
   return text && !finals.includes(text) ? [...finals, text].slice(-keep) : [...finals]
 }
 
-type Row = { role: 'user' | 'assistant'; text: string; toolResults?: readonly unknown[] }
+export type Row = { role: 'user' | 'assistant'; text: string; toolResults?: readonly unknown[] }
 
 /**
  * Each request's final reply in a conversation: the last assistant text before the next prompt the person sent (a
@@ -165,7 +165,7 @@ export function finalReplies(rows: readonly Row[]): string[] {
   return finals
 }
 
-type El = Pick<Elements['terminal'], 'Box' | 'Text'>
+type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 const MARKS = { done: '✓', doing: '●', todo: '○' } as const
 /** Done marks green, the step in progress blue (the mod's own shades); steps not started stay dim. */
@@ -176,8 +176,9 @@ const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 export const DOING_TEXT = '#b0b0b0'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
-export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean) {
-  const { Box, Text } = el
+/** `onClose` clears the checklist: the ✕ at the end of the folded Done line. */
+export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean, onClose: () => void) {
+  const { Box, Text, Button } = el
   if (list === null) {
     return null
   }
@@ -185,9 +186,12 @@ export function renderChecklist(el: El, list: Checklist | null, isWorking: boole
   if (!isWorking && list.items.length > 0 && done === list.items.length) {
     const steps = `${list.items.length} step${list.items.length === 1 ? '' : 's'}`
     return (
-      <Box flexDirection="row">
-        <Text color={MARK_COLORS.done}>{`${MARKS.done} `}</Text>
-        <Text dimColor>{`Done: ${list.title} (${steps})`}</Text>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row" flexShrink={1}>
+          <Text color={MARK_COLORS.done}>{`${MARKS.done} `}</Text>
+          <Text dimColor wrap="truncate-end">{`Done: ${list.title} (${steps})`}</Text>
+        </Box>
+        <Button key="checklist-close" label="✕" plain dimColor onPress={() => onClose()} />
       </Box>
     )
   }

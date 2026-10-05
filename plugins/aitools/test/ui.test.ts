@@ -58,18 +58,64 @@ describe('AbovePrompt band', () => {
     }
   })
 
-  test('the display options come five to a row', async ($, on) => {
+  test('the display options come five to a row; Mascot leads the first row, on the desktop only', async ($, on) => {
+    coreBand(on)
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    const counts: Record<string, (number | undefined)[]> = {}
+    for (const surface of SURFACES) {
+      const ui = await $.ui.mount(band(surface))
+      await ui.press({ key: 'settings' })
+      const rows = []
+      for (let i = 0; (await ui.find({ key: `settings-row-${i}` })) !== undefined; i++) {
+        rows.push(await ui.find({ key: `settings-row-${i}` }))
+      }
+      counts[surface] = rows.map(r => r?.children.length)
+      expect((await ui.find({ key: 'label' }))?.text).toBe('● Title')
+      expect((await ui.find({ key: 'mascot' })) !== undefined).toBe(surface === 'desktop')
+      expect((await ui.find({ key: 'settings-row-0' }))?.text.startsWith('● Mascot')).toBe(surface === 'desktop')
+      await ui.press({ key: 'settings' })
+      await ui.unmount()
+    }
+    expect(counts).toEqual({ terminal: [5, 5, 5], desktop: [6, 5, 5] })
+  })
+
+  test('the mascot stands at the start of the bar on the desktop only, and Mascot hides him', async ($, on) => {
+    coreBand(on)
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    const terminal = await $.ui.mount(band('terminal'))
+    expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+    await terminal.unmount()
+
+    const ui = await $.ui.mount(band('desktop'))
+    const art = await ui.find({ type: 'Svg' })
+    expect(art?.props.alt).toBe('Clawd standing')
+    expect(art?.props.width).toBe(48)
+    expect(art?.props.height).toBe(20)
+    expect(art?.props.isInteractive).toBeUndefined()
+    expect(String(art?.props.source)).toMatch(/^<svg [\s\S]*<\/svg>$/)
+    await ui.press({ key: 'settings' })
+    expect((await ui.find({ key: 'mascot' }))?.text).toBe('● Mascot')
+    await ui.press({ key: 'mascot' })
+    expect((await ui.find({ key: 'mascot' }))?.text).toBe('○ Mascot')
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('metric labels stay dim; their values are the half-dim grey', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
     const ui = await $.ui.mount(band('desktop'))
-    await ui.press({ key: 'settings' })
-    const rows = []
-    for (let i = 0; (await ui.find({ key: `settings-row-${i}` })) !== undefined; i++) {
-      rows.push(await ui.find({ key: `settings-row-${i}` }))
-    }
+    const texts = await ui.findAll({ type: 'Text' })
     await ui.unmount()
-    expect(rows.map(r => r?.children.length)).toEqual([5, 5, 5])
+    // The month is still loading here: `month …`.
+    const label = texts.find(t => t.text === 'month ')
+    const value = texts.find(t => t.text.startsWith('…'))
+    expect(label?.props.dimColor).toBe(true)
+    expect(value?.props.color).toBe('#b0b0b0')
+    expect(value?.props.dimColor).toBeUndefined()
   })
 
   test('the AI Tools label shows by default', async ($, on) => {

@@ -14,6 +14,7 @@ export type ToggleKey =
   | 'monthlyCost'
   | 'burnRate'
   | 'thresholdColors'
+  | 'mascot'
 
 export type Settings = Record<ToggleKey, boolean>
 
@@ -65,6 +66,22 @@ export type AgentCard = {
 /** The helpers started for the current request, and pieces waiting for a free one. */
 export type AgentRun = { startedAt: number; cards: AgentCard[]; queued: string[]; isReported?: boolean }
 
+/** What the mascot is doing; Celebrating, Oops and Waving play for a moment and give way. */
+export type MascotPose = 'idle' | 'working' | 'reading' | 'puzzled' | 'sleeping' | 'celebrate' | 'error' | 'wave'
+
+/**
+ * The mascot's pose and what it changed from (its transition plays while `from` is set). `rest` is the pose a moment
+ * pose gives way to; `change` counts pose changes and `seq` source changes; `since` is when the pose began.
+ */
+export type MascotState = {
+  pose: MascotPose
+  rest: MascotPose
+  from: MascotPose | null
+  change: number
+  seq: number
+  since: number
+}
+
 export type MonthTotal = {
   usd: number
   isEstimate: boolean
@@ -111,6 +128,12 @@ declare module 'claude-code' {
       mainEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | number | null
       /** Bumped every second while helpers run, so their times redraw. */
       dockTick: number
+      /** What the mascot shows; a new session starts it waving. */
+      mascot: MascotState
+      /** How many AskUserQuestion dialogs are open: the mascot looks puzzled while any is. */
+      asking: number
+      /** Whether Claude's last reply ended by asking something; cleared by the person's next prompt. */
+      isQuestionOpen: boolean
     }
   }
 }

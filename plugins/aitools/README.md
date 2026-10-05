@@ -9,7 +9,8 @@ AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k) 
 
 | Segment | Meaning |
 |---|---|
-| `AI Tools` | A dim label naming the bar |
+| Clawd | The mascot, at the start of the bar in the desktop Code tab only (see below) |
+| `AI Tools` | A dim title naming the bar |
 | `5h 42%, 1h12m` | 5-hour usage window: percent used, time until it resets |
 | `wk 18%, Thu` | Weekly window: percent used, the day it resets (hours when under a day) |
 | `ctx 31% 62k/200k` | Context window fill: percent and tokens used / window size |
@@ -21,7 +22,7 @@ AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k) 
 | `month $184.20` | This calendar month's Claude Code usage at API prices, across all sessions on this machine |
 | `limit ~3:40pm` | At your pace over the last hour, when the 5-hour window would run out; shown only if before it resets |
 
-Usage and context turn yellow at 70% and red at 90%. A value not known yet shows `—`; until the first response of a
+Labels are dim and values a lighter grey; usage and context values turn yellow at 70% and red at 90%. A value not known yet shows `—`; until the first response of a
 session the bar shows the figures from your previous session.
 
 ## Show or hide the bar
@@ -31,11 +32,32 @@ sessions. `/handoff` works either way.
 
 ## Settings
 
-Press **⁝** to open the options above the bar, five to a row, and toggle any of: the AI Tools label, 5-hour usage,
+Press **⁝** to open the options above the bar, five to a row, and toggle any of: (in the desktop Code tab only,
+leading the first row) the mascot, the title, 5-hour usage,
 weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, thread cost,
 last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
 Changes show in the bar right away and are saved across sessions. Press **⁝** again to close it; opening it closes the
 **🛠** menu, and the other way round.
+
+## Mascot
+
+In the desktop Code tab, Clawd, Claude Code's pixel mascot, stands at the start of the bar (48 × 20 px) and acts out
+what Claude is doing. Every pose is animated, and a change of pose plays a short transition first: he walks over to his
+laptop or paper, sits down to sleep, jolts awake.
+
+| Pose | When |
+|---|---|
+| Waving | A new session starts (a few seconds) |
+| Standing | Nothing is running: breathing, blinking, glancing around |
+| Typing | A turn is running: tapping at a laptop beside him, code typing out on its screen |
+| Reading | A read-only tool runs (Read, Grep, Glob, a web fetch or search): reading a sheet of paper |
+| Puzzled | A question waits on you: an open AskUserQuestion dialog, or a reply that ends with a question mark. Your next prompt settles it |
+| Celebrating | A turn finishes with an answer (a few seconds, then Standing) |
+| Oops | A tool call fails or is refused, or a turn is interrupted or fails (a few seconds) |
+| Sleeping | Standing idle for 5 minutes; your next prompt wakes him |
+
+He is SVG, so he never shows in the terminal, and **Mascot** in the **⁝** menu (on by default) is offered on the
+desktop only.
 
 ## Handoff
 
@@ -82,7 +104,8 @@ While a view is on, each prompt you send carries a hidden note asking Claude to 
 and report them through the mod's `checklist` tool (`mcp__aitools__checklist`), updating it as each step starts and
 finishes. The mod answers that tool itself, before Claude Code's permission check, so it
 should not ask for permission. Each new prompt starts a fresh checklist;
-once every step is done and Claude stops, it folds to one line, `✓ Done: <title> (<n> steps)`. A quick question that
+once every step is done and Claude stops, it folds to one line, `✓ Done: <title> (<n> steps)`, with a **✕** at its
+right end that closes it. A quick question that
 needs no work gets no checklist.
 
 Clean View recognizes a final reply as the last thing Claude wrote before your next prompt. It reads them from the

@@ -3,8 +3,10 @@ import type { Settings, ToggleKey } from '../types'
 /** The slice of `$.store` the mod needs; the hooks module passes `$.store` itself. */
 export type KeyStore = { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> }
 
-export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
-  { key: 'label', label: 'AI Tools label' },
+/** `needsSvg`: an option only surfaces that draw SVG offer (the desktop), since the terminal cannot show it. */
+export const TOGGLES: readonly { key: ToggleKey; label: string; needsSvg?: true }[] = [
+  { key: 'mascot', label: 'Mascot', needsSvg: true },
+  { key: 'label', label: 'Title' },
   { key: 'fiveHour', label: '5-hour usage' },
   { key: 'weekly', label: 'Weekly usage' },
   { key: 'resets', label: 'Reset countdowns' },

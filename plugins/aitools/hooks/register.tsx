@@ -35,11 +35,21 @@ import {
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
+import {
+  MASCOT_START,
+  ONE_SHOT_MS,
+  READ_TOOLS,
+  SLEEP_AFTER_MS,
+  endsWithQuestion,
+  introMs,
+  isQuestionOpenIn,
+  mascotDrawing,
+} from '../src/mascot'
 import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { Brief, HelperMode, LimitWindow, Snapshot, TeamSize, ViewMode } from '../types'
+import type { Brief, HelperMode, LimitWindow, MascotPose, MascotState, Snapshot, TeamSize, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
 // function that touches `$` lives here; src/ holds the pure units.
@@ -65,6 +75,9 @@ const helpers = atom({ plugin: 'aitools', key: 'helpers' } as const, 'same')
 const agentRun = atom({ plugin: 'aitools', key: 'agentRun' } as const, null)
 const mainEffort = atom({ plugin: 'aitools', key: 'mainEffort' } as const, null)
 const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
+const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
+const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
+const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as const, false)
 
 const HANDOFF_PANE = 'handoff'
 
@@ -72,6 +85,8 @@ const HANDOFF_PANE = 'handoff'
 const PERSON_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
 /** How many Agent Dock trace lines the store keeps. */
 const TRACE_KEEP = 60
+/** The mod's own tools: reporting progress is not work the mascot reacts to. */
+const QUIET_TOOLS: ReadonlySet<string> = new Set([CHECKLIST_TOOL_ID, PROGRESS_TOOL_ID])
 /** How long a helper's first model request waits for its own start to be recorded, at most. */
 const SPAWN_WAIT_MS = 2000
 
@@ -83,6 +98,8 @@ const SPAWN_WAIT_MS = 2000
 let reservedPlaces = 0
 const liveHelpers = new Set<string>()
 const startsInFlight = new Set<Promise<void>>()
+/** Read-only tool calls of the main chat in flight: the mascot reads until the last one returns. */
+let readsInFlight = 0
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
 
@@ -438,6 +455,56 @@ async function reportRun($: EngineInterface): Promise<void> {
   await update($, agentRun, r => (r === null ? r : { ...r, isReported: true }))
 }
 
+/**
+ * Shows `pose`, playing its transition from the pose before first; `rest` is the pose a moment pose (ONE_SHOT_MS)
+ * gives way to. Showing the pose already up only changes what it gives way to.
+ */
+async function showMascot($: EngineInterface, pose: MascotPose, rest: MascotPose = pose): Promise<void> {
+  const now = await $.clock.now()
+  // Checked inside the update, so two calls at once (parallel tool calls) change the pose once.
+  let isChanged = false
+  const shown = await update($, mascot, m => {
+    isChanged = m.pose !== pose
+    return isChanged ? { pose, rest, from: m.pose, change: m.change + 1, seq: m.seq + 1, since: now } : { ...m, rest }
+  })
+  if (!isChanged) {
+    return
+  }
+  const { change } = shown
+  // Once the intro has played the source drops it, so a redraw can only ever restart the loop.
+  $.clock.after(introMs(pose, shown.from), () => void settleMascot($, change))
+  const hold = ONE_SHOT_MS[pose]
+  if (hold !== undefined) {
+    $.clock.after(hold, () => void endMoment($, change))
+  }
+}
+
+/** Drops the played intro from the mascot's source, unless the pose changed since. */
+async function settleMascot($: EngineInterface, change: number): Promise<void> {
+  await update($, mascot, m => (m.change === change && m.from !== null ? { ...m, from: null, seq: m.seq + 1 } : m))
+}
+
+/** A moment pose that is still up gives way to the pose underneath it. */
+async function endMoment($: EngineInterface, change: number): Promise<void> {
+  const shown = await read($, mascot)
+  if (shown.change === change) {
+    await showMascot($, shown.rest)
+  }
+}
+
+/** The pose underneath when no turn runs: puzzled while a question waits on the person, standing otherwise. */
+async function restingPose($: EngineInterface): Promise<MascotPose> {
+  return (await read($, asking)) > 0 || (await read($, isQuestionOpen)) ? 'puzzled' : 'idle'
+}
+
+/** Standing idle long enough, the mascot sits down and falls asleep; the person's next prompt wakes him. */
+async function checkSleep($: EngineInterface): Promise<void> {
+  const shown = await read($, mascot)
+  if (shown.pose === 'idle' && (await $.clock.now()) - shown.since >= SLEEP_AFTER_MS) {
+    await showMascot($, 'sleeping')
+  }
+}
+
 /** Draws nothing in a transcript row's place: how Clean View hides tool calls and in-progress replies. */
 function drawNothing($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) {
   const { Box } = $.ui.resolve(e)
@@ -454,6 +521,17 @@ async function toggleMenu($: EngineInterface, menu: 'tools' | 'settings'): Promi
   } else if (await update($, isSettingsOpen, open => !open)) {
     await update($, isToolsOpen, () => false)
   }
+}
+
+/** The mascot drawing last built: it only changes with the pose, so redraws of the bar reuse it. */
+let lastMascot: { state: MascotState; drawing: ReturnType<typeof mascotDrawing> } | null = null
+
+function drawMascot(state: MascotState): ReturnType<typeof mascotDrawing> {
+  if (lastMascot?.state.pose !== state.pose || lastMascot.state.from !== state.from || lastMascot.state.seq !== state.seq) {
+    lastMascot = { state, drawing: mascotDrawing(state) }
+  }
+
+  return lastMascot.drawing
 }
 
 /** The bar, with the 🛠 or ⁝ menu above it while one is open, for the AbovePrompt band. */
@@ -476,8 +554,13 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isSettingsOpen: await read($, isSettingsOpen),
     viewMode: await read($, viewMode),
     isDockOpen: await read($, isDockOpen),
+    // Read only where it is drawn and turned on, so no other bar redraws for the mascot.
+    mascot: el.Svg && current.mascot ? drawMascot(await read($, mascot)) : null,
   }
-  const list = flags.viewMode === 'off' ? null : renderChecklist(el, await read($, checklist), isWorking)
+  const list =
+    flags.viewMode === 'off'
+      ? null
+      : renderChecklist(el, await read($, checklist), isWorking, () => void update($, checklist, () => null))
 
   return renderBar(el, view, flags, {
     toggleTools: () => void toggleMenu($, 'tools'),
@@ -533,7 +616,11 @@ export const register: Register = on => {
       await update($, snapshot, () => fresh)
     }
     await restoreCacheAt($)
-    $.clock.every(TICK_MS, () => void update($, tick, n => (n ?? 0) + 1))
+    // The tick also checks whether the mascot has stood idle long enough to fall asleep.
+    $.clock.every(TICK_MS, () => {
+      void update($, tick, n => (n ?? 0) + 1)
+      void checkSleep($)
+    })
     const hidden = (await $.store.get('isHidden')) === true
     await update($, isHidden, () => hidden)
     await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar', argumentHint: '[on|off]' })
@@ -542,8 +629,21 @@ export const register: Register = on => {
     await update($, viewMode, () => view)
     await showStatus($)
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back.
-    const earlier = finalReplies(await $.session.messages().catch(() => []))
+    const rows = await $.session.messages().catch(() => [])
+    const earlier = finalReplies(rows)
     await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
+    const isAsked = isQuestionOpenIn(rows)
+    await update($, isQuestionOpen, () => isAsked)
+    // A new session starts the mascot waving. A reload keeps his pose, but its timers went with the old module: a
+    // moment pose gives way now and a transition still playing is dropped.
+    const shown = await read($, mascot)
+    if (shown.change === 0) {
+      await showMascot($, 'wave', await restingPose($))
+    } else if (ONE_SHOT_MS[shown.pose] !== undefined) {
+      await showMascot($, shown.rest)
+    } else {
+      await settleMascot($, shown.change)
+    }
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
     const savedTeam = await $.store.get('agentTeam')
@@ -572,6 +672,9 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    if ((await read($, asking)) === 0) {
+      await showMascot($, 'working')
+    }
     const cost = (await $.session.usage()).cost?.usd
     if (cost !== undefined) {
       await update($, turnBaseline, () => ({ turnId: e.turnId, usd: cost }))
@@ -622,6 +725,11 @@ export const register: Register = on => {
       return next(e)
     }
     await update($, finals, list => addFinal(list, e.answer))
+    // A finished answer is celebrated, unless it asks something; a turn that failed or was interrupted startles him.
+    const isAsked = e.reason === 'answer' && endsWithQuestion(e.answer)
+    await update($, isQuestionOpen, () => isAsked)
+    const rest = await restingPose($)
+    await showMascot($, e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate', rest)
     const baseline = await read($, turnBaseline)
     const base = baseline?.turnId === e.turnId ? baseline.usd : undefined
     await update($, turnBaseline, () => null)
@@ -683,6 +791,7 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     if (PERSON_ORIGINS.has(e.origin.kind)) {
       await update($, checklist, () => null)
+      await update($, isQuestionOpen, () => false)
       if (!isRunning(await read($, agentRun)) && (await read($, agentRun)) !== null) {
         await traceDock($, `reset by ${e.origin.kind} prompt`)
         await update($, agentRun, () => null)
@@ -785,6 +894,44 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The mascot follows the main chat's tools: reading while a read-only tool runs, puzzled while an AskUserQuestion
+  // dialog waits (its `next` resolves once answered), startled when a call fails or is refused.
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId !== undefined || QUIET_TOOLS.has(e.tool)) {
+      return next(e)
+    }
+    if (e.tool === 'AskUserQuestion') {
+      await update($, asking, n => n + 1)
+      await showMascot($, 'puzzled', 'working')
+      try {
+        return await next(e)
+      } finally {
+        await update($, asking, n => Math.max(0, n - 1))
+        await showMascot($, 'working')
+      }
+    }
+    const isReading = READ_TOOLS.has(e.tool)
+    if (isReading) {
+      readsInFlight += 1
+      await showMascot($, 'reading', 'working')
+    }
+    let isFailed = true
+    try {
+      const result = await next(e)
+      isFailed = result.deny !== undefined || result.isError === true
+      return result
+    } finally {
+      if (isReading) {
+        readsInFlight = Math.max(0, readsInFlight - 1)
+      }
+      if (isFailed) {
+        await showMascot($, 'error', readsInFlight > 0 ? 'reading' : 'working')
+      } else if (isReading && readsInFlight === 0) {
+        await showMascot($, 'working')
+      }
+    }
+  })
+
   // Answered here without `next`: the call never reaches a permission dialog, and nothing runs but this.
   on('tool.call', { tool: CHECKLIST_TOOL_ID }, async ($, e) => {
     const parsed = parseChecklist(e)
@@ -829,7 +976,9 @@ export const register: Register = on => {
     }
     const below = await next(e)
     const el = $.ui.resolve(e)
-    const bar = await drawBar($, el, e.props.isWorking)
+    // The mascot is SVG: the terminal never gets it, whatever its table holds.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+    const bar = await drawBar($, { Box: el.Box, Text: el.Text, Button: el.Button, Svg }, e.props.isWorking)
     if (below.type === 'engine') return bar
     const { Box } = el
     return (

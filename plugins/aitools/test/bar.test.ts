@@ -44,6 +44,14 @@ describe('segments', () => {
     ])
   })
 
+  test('each metric leads with its label, the rest its value', () => {
+    const variants = [view(), view({ snapshot: null, cacheAt: null }), view({}, { threadCost: false, threadTokens: false })]
+    for (const s of variants.flatMap(v => segments(v))) {
+      expect(s.text.startsWith(`${s.label} `)).toBe(true)
+    }
+    expect(segments(view()).map(s => s.label)).toEqual(['5h', 'wk', 'ctx', 'tok', 'cache', 'thread', 'month', 'limit'])
+  })
+
   test('resets off drops countdowns', () => {
     expect(texts(view({}, { resets: false })).slice(0, 2)).toEqual(['5h 42%', 'wk 18%'])
   })

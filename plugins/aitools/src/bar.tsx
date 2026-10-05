@@ -2,8 +2,9 @@ import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
 import { usdSince } from './transcripts'
-import { VIEW_NAMES } from './checklist'
+import { DOING_TEXT, VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
+import { MASCOT_HEIGHT, MASCOT_WIDTH } from './mascot'
 import { TOGGLES } from './settings'
 import type { MonthTotal, Settings, Snapshot, ToggleKey, ViewMode } from '../types'
 
@@ -19,7 +20,8 @@ export type View = {
 
 export type Tone = 'warn' | 'danger' | undefined
 
-export type Segment = { key: string; text: string; tone?: Tone }
+/** One metric: `text` is the whole of it, `label` the leading word(s) naming it, drawn dimmer than the value after. */
+export type Segment = { key: string; label: string; text: string; tone?: Tone }
 
 export const SEPARATOR = '    '
 /** Names the mod at the start of the bar; the `label` toggle hides it. */
@@ -32,6 +34,8 @@ const DASH = '—'
 const MIN = 60_000
 const CACHE_WARN = 10 * MIN
 const TONE_COLORS = { warn: 'yellow', danger: 'red' } as const
+/** Values in the checklist's half-dim grey: brighter than their dim labels, quieter than full text. */
+const VALUE_COLOR = DOING_TEXT
 
 export function toneFor(pct: number | undefined, settings: Settings): Tone {
   if (!settings.thresholdColors || pct === undefined) {
@@ -43,13 +47,13 @@ export function toneFor(pct: number | undefined, settings: Settings): Tone {
 
 function cacheSegment(cacheAt: number | null, now: number, settings: Settings): Segment {
   if (cacheAt === null) {
-    return { key: 'cache', text: `cache ${DASH}` }
+    return { key: 'cache', label: 'cache', text: `cache ${DASH}` }
   }
   const left = cacheAt + CACHE_TTL - now
   const tone: Tone = !settings.thresholdColors ? undefined : left <= 0 ? 'danger' : left < CACHE_WARN ? 'warn' : undefined
   const text = left <= 0 ? 'cache cold' : `cache ${Math.max(1, Math.ceil(left / MIN))}m`
 
-  return { key: 'cache', text, tone }
+  return { key: 'cache', label: 'cache', text, tone }
 }
 
 function monthText(month: MonthTotal): string {
@@ -99,13 +103,13 @@ function threadSegment(view: View): Segment | null {
   if (on.threadCost) {
     const turn = on.lastTurnCost && last !== undefined ? ` (+${usd(last)})` : ''
     const pct = threadShare === null ? '' : ` ${threadShare} wk${lastShare === null ? '' : ` (+${lastShare.slice(1)})`}`
-    return { key: 'thread', text: `thread ${thread === undefined ? DASH : usd(thread)}${turn}${pct}` }
+    return { key: 'thread', label: 'thread', text: `thread ${thread === undefined ? DASH : usd(thread)}${turn}${pct}` }
   }
   if (on.lastTurnCost) {
-    return { key: 'thread', text: `last ${last === undefined ? DASH : usd(last)}${lastShare === null ? '' : ` ${lastShare} wk`}` }
+    return { key: 'thread', label: 'last', text: `last ${last === undefined ? DASH : usd(last)}${lastShare === null ? '' : ` ${lastShare} wk`}` }
   }
   if (threadShare !== null) {
-    return { key: 'thread', text: `thread ${threadShare} wk` }
+    return { key: 'thread', label: 'thread', text: `thread ${threadShare} wk` }
   }
 
   return null
@@ -116,10 +120,10 @@ function tokenSegment(snapshot: Snapshot | null, on: Settings): Segment {
   const count = (n: number | undefined) => (n === undefined ? DASH : tokens(n))
   if (on.threadTokens) {
     const turn = on.lastTurnTokens && snapshot?.lastTurnTokens !== undefined ? ` (+${tokens(snapshot.lastTurnTokens)})` : ''
-    return { key: 'tokens', text: `tok ${count(snapshot?.threadTokens)}${turn}` }
+    return { key: 'tokens', label: 'tok', text: `tok ${count(snapshot?.threadTokens)}${turn}` }
   }
 
-  return { key: 'tokens', text: `last tok ${count(snapshot?.lastTurnTokens)}` }
+  return { key: 'tokens', label: 'last tok', text: `last tok ${count(snapshot?.lastTurnTokens)}` }
 }
 
 export function segments(view: View): Segment[] {
@@ -132,11 +136,11 @@ export function segments(view: View): Segment[] {
 
   if (on.fiveHour) {
     const reset = on.resets && fiveHour?.resetsAt ? `, ${duration(Date.parse(fiveHour.resetsAt) - now)}` : ''
-    segs.push({ key: 'fiveHour', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on) })
+    segs.push({ key: 'fiveHour', label: '5h', text: `5h ${pct(fiveHour?.percentUsed)}${reset}`, tone: toneFor(fiveHour?.percentUsed, on) })
   }
   if (on.weekly) {
     const reset = on.resets && weekly?.resetsAt ? `, ${weeklyReset(weekly.resetsAt, now)}` : ''
-    segs.push({ key: 'weekly', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on) })
+    segs.push({ key: 'weekly', label: 'wk', text: `wk ${pct(weekly?.percentUsed)}${reset}`, tone: toneFor(weekly?.percentUsed, on) })
   }
   if (on.contextPercent || on.contextTokens) {
     const parts: string[] = []
@@ -148,7 +152,7 @@ export function segments(view: View): Segment[] {
     } else if (on.contextTokens && !on.contextPercent) {
       parts.push(DASH)
     }
-    segs.push({ key: 'context', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on) })
+    segs.push({ key: 'context', label: 'ctx', text: `ctx ${parts.join(' ')}`, tone: toneFor(context?.percent, on) })
   }
   if (on.threadTokens || on.lastTurnTokens) {
     segs.push(tokenSegment(snapshot, on))
@@ -161,16 +165,17 @@ export function segments(view: View): Segment[] {
     segs.push(threadSeg)
   }
   if (on.monthlyCost) {
-    segs.push({ key: 'month', text: monthText(view.month) })
+    segs.push({ key: 'month', label: 'month', text: monthText(view.month) })
   }
   if (on.burnRate && view.projection !== null) {
-    segs.push({ key: 'burn', text: `limit ~${clockTime(view.projection)}` })
+    segs.push({ key: 'burn', label: 'limit', text: `limit ~${clockTime(view.projection)}` })
   }
 
   return segs
 }
 
-type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+/** `Svg` only where the surface draws it (the desktop): the mascot and its option show there alone. */
+type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] }
 
 /** The 🛠 menu's view options; picking the one that is on turns it off. */
 const VIEWS = [
@@ -194,6 +199,8 @@ export function renderBar(
     isSettingsOpen: boolean
     viewMode: ViewMode
     isDockOpen: boolean
+    /** The mascot's drawing as it stands now. */
+    mascot: { source: string; alt: string } | null
   },
   on: {
     toggleTools(): void
@@ -206,13 +213,21 @@ export function renderBar(
   },
   checklist: ReturnType<typeof renderChecklist> = null,
 ) {
-  const { Box, Text, Button } = el
+  const { Box, Text, Button, Svg } = el
   const isHandoffIdle = !flags.isWorking && !flags.isHandingOff
   const segs = segments(view)
 
-  // Segments wrap onto further rows when the band is narrow; the buttons keep their place on the right.
+  const art = Svg && view.settings.mascot ? flags.mascot : null
+
+  // Segments wrap onto further rows when the band is narrow; the mascot and the buttons keep their places at the ends.
+  // Beside the mascot the row centers on him; without him the buttons stay on the first row of text.
   const bar = (
-    <Box flexDirection="row" justifyContent="space-between">
+    <Box flexDirection="row" justifyContent="space-between" {...(art ? { alignItems: 'center' as const } : {})}>
+      {Svg && art && (
+        <Box key="mascot-art" flexShrink={0} marginRight={1}>
+          <Svg source={art.source} alt={art.alt} width={MASCOT_WIDTH} height={MASCOT_HEIGHT} />
+        </Box>
+      )}
       <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>
         {view.settings.label && (
           <Text key="label" dimColor>
@@ -221,10 +236,14 @@ export function renderBar(
           </Text>
         )}
         {segs.map((s, i) => (
-          <Text key={s.key} color={s.tone ? TONE_COLORS[s.tone] : undefined} dimColor={!s.tone}>
-            {s.text}
-            {i < segs.length - 1 ? SEPARATOR : ''}
-          </Text>
+          // Label and value in one row, so a narrow band wraps between metrics, never inside one.
+          <Box key={`segment-${s.key}`} flexDirection="row">
+            <Text dimColor>{`${s.label} `}</Text>
+            <Text color={s.tone ? TONE_COLORS[s.tone] : VALUE_COLOR}>
+              {s.text.slice(s.label.length + 1)}
+              {i < segs.length - 1 ? SEPARATOR : ''}
+            </Text>
+          </Box>
         ))}
       </Box>
       <Box flexDirection="row" gap={0} flexShrink={0}>
@@ -237,9 +256,14 @@ export function renderBar(
   let menu = null
   if (flags.isSettingsOpen) {
     // At most SETTINGS_PER_ROW options to a row; a narrow band still wraps a row further.
-    const rows = Array.from({ length: Math.ceil(TOGGLES.length / SETTINGS_PER_ROW) }, (_, i) =>
-      TOGGLES.slice(i * SETTINGS_PER_ROW, (i + 1) * SETTINGS_PER_ROW),
+    // The desktop's own options (Mascot) lead the first row, on top of its usual count.
+    const shared = TOGGLES.filter(t => !t.needsSvg)
+    const rows = Array.from({ length: Math.ceil(shared.length / SETTINGS_PER_ROW) }, (_, i) =>
+      shared.slice(i * SETTINGS_PER_ROW, (i + 1) * SETTINGS_PER_ROW),
     )
+    if (Svg) {
+      rows[0] = [...TOGGLES.filter(t => t.needsSvg), ...(rows[0] ?? [])]
+    }
     menu = (
       <Box flexDirection="column">
         {rows.map((row, i) => (

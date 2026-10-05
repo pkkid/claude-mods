@@ -1,8 +1,11 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
+
+/** The test's clock, set by `start`. */
+let clock: MockClock
 
 const PREVIOUS = {
   fiveHour: { percentUsed: 40 },
@@ -74,7 +77,7 @@ async function start(
   steps: Step[] = [],
 ) {
   mock.store(on, { lastSnapshot: PREVIOUS, ...stored })
-  mock.clock(on, { now: NOW })
+  clock = mock.clock(on, { now: NOW })
   coreBand(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
@@ -434,6 +437,18 @@ describe('wiring', () => {
       const text = await barText($)
       expect(text).toContain('✓ Done: Dark mode (3 steps)')
       expect(text).not.toContain('Read the theme')
+    })
+
+    test('the ✕ at the end of the Done line closes it', async ($, on) => {
+      await start($, on, { usd: 0 })
+      await pickView($, 'task')
+      await $.tool.call({ tool: CHECKLIST, ...PLAN, items: PLAN.items.map(i => ({ ...i, status: 'done' })) })
+      const ui = await $.ui.mount(band())
+      expect((await ui.find({ key: 'checklist-close' }))?.text).toBe('✕')
+      await ui.press({ key: 'checklist-close' })
+      expect(await ui.find({ text: /Done: Dark mode/ })).toBeUndefined()
+      expect(await ui.find({ key: 'checklist-close' })).toBeUndefined()
+      await ui.unmount()
     })
 
     test('Task View hides only the checklist tool row; Clean View hides every tool row', async ($, on) => {
@@ -824,5 +839,165 @@ describe('wiring', () => {
     engineBand(on)
     await start($, on, { usd: 0 }, { isHidden: true })
     expect(await hasBar($)).toBe(false)
+  })
+
+  describe('mascot', () => {
+    /** What the mascot's drawing says on the desktop bar, and its source. */
+    async function mascot($: Engine): Promise<{ alt: unknown; source: unknown }> {
+      const ui = await $.ui.mount(band())
+      const art = await ui.find({ type: 'Svg' })
+      await ui.unmount()
+
+      return { alt: art?.props.alt, source: art?.props.source }
+    }
+    const pose = async ($: Engine) => (await mascot($)).alt
+
+    /** Starts a session past its greeting, with the person's prompts and a Read tool answered beneath. */
+    async function begin($: Engine, on: On, messages: Row[] = []) {
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      on('tool.call', { tool: 'Read' }, () => ({ result: 'file text' }))
+      on('tool.call', { tool: 'Bash' }, () => ({ result: 'boom', isError: true as const }))
+      await start($, on, { usd: 0 }, {}, messages)
+    }
+
+    /** The person's prompt and the turn it starts. */
+    async function prompt($: Engine, text: string) {
+      await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+      await $.turn.start({ text, turnId: 't1' })
+    }
+
+    test('a new session starts him waving, then standing', async ($, on) => {
+      await begin($, on)
+      expect(await pose($)).toBe('Clawd waving')
+      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('a prompt that starts no turn leaves him as he is', async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      await $.prompt.submit({ text: 'blocked', wait: false, origin: { kind: 'composer' } })
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('reading lasts until the last of several read-only calls returns', async ($, on) => {
+      let release = () => {}
+      const slow = new Promise<void>(resolve => (release = resolve))
+      on('tool.call', { tool: 'WebFetch' }, async () => {
+        await slow
+        return { result: 'page text' }
+      })
+      await begin($, on)
+      await prompt($, 'Look things up')
+      const pending = $.tool.call({ tool: 'WebFetch', url: 'https://example.com', prompt: 'x' } as never)
+      await clock.settle()
+      await $.tool.call({ tool: 'Read', file_path: '/a' } as never)
+      expect(await pose($)).toBe('Clawd reading a sheet of paper')
+      release()
+      await pending
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('a prompt sets him typing; a read-only tool has him reading, then typing again', async ($, on) => {
+      let during: unknown
+      on('tool.call', { tool: 'WebFetch' }, async () => {
+        during = await pose($)
+        return { result: 'page text' }
+      })
+      await begin($, on)
+      await prompt($, 'Fix the bug')
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+      await $.tool.call({ tool: 'WebFetch', url: 'https://example.com', prompt: 'x' } as never)
+      expect(during).toBe('Clawd reading a sheet of paper')
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('a failed tool startles him for a moment, then he types again', async ($, on) => {
+      await begin($, on)
+      await $.turn.start({ text: 'go', turnId: 't1' })
+      await $.tool.call({ tool: 'Bash', command: 'false' } as never)
+      expect(await pose($)).toBe('Clawd startled')
+      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('a finished answer is celebrated, then he stands', async ($, on) => {
+      await begin($, on)
+      await $.turn.start({ text: 'go', turnId: 't1' })
+      await $.turn.complete({ ...complete('t1'), answer: 'Fixed it.' })
+      expect(await pose($)).toBe('Clawd celebrating')
+      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('an answer that asks something puzzles him until the person replies', async ($, on) => {
+      await begin($, on)
+      await $.turn.complete({ ...complete('t1'), answer: 'Which file should I change?' })
+      expect(await pose($)).toBe('Clawd looking puzzled')
+      await clock.advance(10 * 60_000)
+      expect(await pose($)).toBe('Clawd looking puzzled')
+      await prompt($, 'bar.tsx')
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('an interrupted turn startles him, then he stands', async ($, on) => {
+      await begin($, on)
+      await $.turn.complete({ ...complete('t1'), reason: 'aborted', isAborted: true })
+      expect(await pose($)).toBe('Clawd startled')
+      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('puzzled while an AskUserQuestion dialog is open, typing once it is answered', async ($, on) => {
+      let during: unknown
+      on('tool.call', { tool: 'AskUserQuestion' }, async () => {
+        during = await pose($)
+        return { result: 'Picked blue' }
+      })
+      await begin($, on)
+      await $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never)
+      expect(during).toBe('Clawd looking puzzled')
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('standing idle for five minutes he falls asleep; a prompt wakes him', async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      await clock.advance(4 * 60_000)
+      expect(await pose($)).toBe('Clawd standing')
+      // Checked every 30 seconds, so asleep within half a minute past five.
+      await clock.advance(90_000)
+      expect(await pose($)).toBe('Clawd asleep')
+      await prompt($, 'Wake up')
+      expect(await pose($)).toBe('Clawd typing on a laptop')
+    })
+
+    test('a change of pose plays its transition, then the source drops it', async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      await prompt($, 'go')
+      const first = await mascot($)
+      await clock.advance(2000)
+      const settled = await mascot($)
+      expect(settled.alt).toBe(first.alt)
+      expect(settled.source).not.toBe(first.source)
+      expect(String(first.source).length).toBeGreaterThan(String(settled.source).length)
+    })
+
+    test("the mod's own checklist tool leaves him as he is", async ($, on) => {
+      await begin($, on)
+      await clock.advance(3000)
+      await $.tool.call({ tool: 'mcp__aitools__checklist', title: 'Plan', items: [{ text: 'One', status: 'doing' }] })
+      expect(await pose($)).toBe('Clawd standing')
+    })
+
+    test('a question left open before the mod loaded still puzzles him after his greeting', async ($, on) => {
+      await begin($, on, [
+        { role: 'user', text: 'Add dark mode', toolUses: [] },
+        { role: 'assistant', text: 'Should it follow the system setting?', toolUses: [] },
+      ])
+      await clock.advance(3000)
+      expect(await pose($)).toBe('Clawd looking puzzled')
+    })
   })
 })
