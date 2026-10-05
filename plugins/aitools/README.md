@@ -36,7 +36,11 @@ Press **⁝** to open the options above the bar, five to a row, and toggle any o
 leading the first row) the mascot, the title, 5-hour usage,
 weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, thread cost,
 last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
-Changes show in the bar right away and are saved across sessions. Press **⁝** again to close it; opening it closes the
+Changes show in the bar right away and are saved across sessions. An option that is off does no work in the
+background: the transcript scan runs only for monthly cost, thread tokens or thread cost %; the cost lookups only for
+the cost options; the cache timer only for cache warmth; the mascot follows nothing while hidden. Turned back on, an
+option catches up at once, except the burn-rate projection, which needs fresh samples (a few responses) to project
+from. Hiding the bar with `/aitools off` stops all of it. Press **⁝** again to close it; opening it closes the
 **🛠** menu, and the other way round.
 
 ## Mascot
@@ -104,7 +108,7 @@ While a view is on, each prompt you send carries a hidden note asking Claude to 
 and report them through the mod's `checklist` tool (`mcp__aitools__checklist`), updating it as each step starts and
 finishes. The mod answers that tool itself, before Claude Code's permission check, so it
 should not ask for permission. Each new prompt starts a fresh checklist;
-once every step is done and Claude stops, it folds to one line, `✓ Done: <title> (<n> steps)`, with a **✕** at its
+once every step is done and Claude stops, it folds to one line, `✓ Done: <title> (<n> steps)`, with a **×** at its
 right end that closes it. A quick question that
 needs no work gets no checklist.
 

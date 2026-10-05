@@ -6,6 +6,10 @@ const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
 /** The test's clock, set by `start`. */
 let clock: MockClock
+/** The tools the mod has offered the model, by short name, set by `start`. */
+let registered: string[] = []
+/** How many times the transcript scan listed a folder, set by `start`. */
+let scans = 0
 
 const PREVIOUS = {
   fiveHour: { percentUsed: 40 },
@@ -81,10 +85,21 @@ async function start(
   coreBand(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('tool.register', (_, e) => ({ value: { tool: `mcp__aitools__${e.name}` } }))
+  registered = []
+  scans = 0
+  on('tool.register', (_, e) => {
+    registered.push(e.name)
+    return { value: { tool: `mcp__aitools__${e.name}` } }
+  })
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/test' : undefined }))
+  on('fs.list', () => {
+    scans += 1
+    return { value: [] }
+  })
   on('session.messages', () => ({ value: messages }))
   const panes = mockPanes(on)
   on('session.id', () => ({ value: 'session-1' }))
+  on('session.surfaces', () => ({ value: ['desktop' as const] }))
   on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [], cost: { usd: costs.usd } } }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
@@ -439,12 +454,12 @@ describe('wiring', () => {
       expect(text).not.toContain('Read the theme')
     })
 
-    test('the ✕ at the end of the Done line closes it', async ($, on) => {
+    test('the × at the end of the Done line closes it', async ($, on) => {
       await start($, on, { usd: 0 })
       await pickView($, 'task')
       await $.tool.call({ tool: CHECKLIST, ...PLAN, items: PLAN.items.map(i => ({ ...i, status: 'done' })) })
       const ui = await $.ui.mount(band())
-      expect((await ui.find({ key: 'checklist-close' }))?.text).toBe('✕')
+      expect((await ui.find({ key: 'checklist-close' }))?.text).toBe('×')
       await ui.press({ key: 'checklist-close' })
       expect(await ui.find({ text: /Done: Dark mode/ })).toBeUndefined()
       expect(await ui.find({ key: 'checklist-close' })).toBeUndefined()
@@ -998,6 +1013,67 @@ describe('wiring', () => {
       ])
       await clock.advance(3000)
       expect(await pose($)).toBe('Clawd looking puzzled')
+    })
+  })
+
+  describe('features turned off do no work', () => {
+    const command = ($: Engine, name: string, args = '') =>
+      $.command.run({ command: name, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+
+    async function toggleOption($: Engine, key: string) {
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'settings' })
+      await ui.press({ key })
+      await ui.press({ key: 'settings' })
+      await ui.unmount()
+    }
+
+    test('no transcript scan while the month, thread tokens and weekly share are all off; turning one on scans', async ($, on) => {
+      const off = { monthlyCost: false, threadTokens: false, threadPercent: false }
+      await start($, on, { usd: 0 }, { settings: off })
+      await $.turn.complete({ ...complete('t1'), answer: 'Done.' })
+      await clock.settle()
+      expect(scans).toBe(0)
+      await toggleOption($, 'monthlyCost')
+      await clock.settle()
+      expect(scans).toBeGreaterThan(0)
+    })
+
+    test('no scan while the bar is hidden; showing it scans', async ($, on) => {
+      await start($, on, { usd: 0 }, { isHidden: true })
+      await clock.settle()
+      expect(scans).toBe(0)
+      await command($, 'aitools', 'on')
+      await clock.settle()
+      expect(scans).toBeGreaterThan(0)
+    })
+
+    test('the checklist and progress tools are offered only once their view or the dock is on', async ($, on) => {
+      await start($, on, { usd: 0 })
+      expect(registered).toEqual([])
+      await command($, 'taskview', 'on')
+      expect(registered).toEqual(['checklist'])
+      await command($, 'agentdock')
+      expect(registered).toEqual(['checklist', 'agent_progress'])
+    })
+
+    test('a saved view offers its tool when the session starts', async ($, on) => {
+      await start($, on, { usd: 0 }, { viewMode: 'clean' })
+      expect(registered).toEqual(['checklist'])
+    })
+
+    test('the mascot follows nothing while his option is off, and starts from where things stand when turned on', async ($, on) => {
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 }, { settings: { mascot: false } }, [
+        { role: 'user', text: 'Pick a color', toolUses: [] },
+        { role: 'assistant', text: 'Which one do you want?', toolUses: [] },
+      ])
+      await $.turn.start({ text: 'go', turnId: 't1' })
+      await $.turn.complete({ ...complete('t1'), answer: 'Which one do you want?' })
+      await toggleOption($, 'mascot')
+      const ui = await $.ui.mount(band())
+      expect((await ui.find({ type: 'Svg' }))?.props.alt).toBe('Clawd looking puzzled')
+      await ui.unmount()
     })
   })
 })

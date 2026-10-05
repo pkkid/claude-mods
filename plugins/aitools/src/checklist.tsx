@@ -176,7 +176,7 @@ const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 export const DOING_TEXT = '#b0b0b0'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
-/** `onClose` clears the checklist: the ✕ at the end of the folded Done line. */
+/** `onClose` clears the checklist: the × at the end of the folded Done line. */
 export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean, onClose: () => void) {
   const { Box, Text, Button } = el
   if (list === null) {
@@ -191,7 +191,7 @@ export function renderChecklist(el: El, list: Checklist | null, isWorking: boole
           <Text color={MARK_COLORS.done}>{`${MARKS.done} `}</Text>
           <Text dimColor wrap="truncate-end">{`Done: ${list.title} (${steps})`}</Text>
         </Box>
-        <Button key="checklist-close" label="✕" plain dimColor onPress={() => onClose()} />
+        <Button key="checklist-close" label="×" plain dimColor onPress={() => onClose()} />
       </Box>
     )
   }

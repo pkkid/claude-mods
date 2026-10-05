@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import {
   FAST_EFFORT,
@@ -49,7 +49,7 @@ import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSett
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { Brief, HelperMode, LimitWindow, MascotPose, MascotState, Snapshot, TeamSize, ViewMode } from '../types'
+import type { Brief, HelperMode, LimitWindow, MascotPose, MascotState, Snapshot, TeamSize, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
 // function that touches `$` lives here; src/ holds the pure units.
@@ -100,6 +100,12 @@ const liveHelpers = new Set<string>()
 const startsInFlight = new Set<Promise<void>>()
 /** Read-only tool calls of the main chat in flight: the mascot reads until the last one returns. */
 let readsInFlight = 0
+/** Whether a main-chat turn is running: where the mascot stands when he is turned on mid-session. */
+let isTurnRunning = false
+/** The once-a-second timer that redraws helper times: running only while the Agent Dock is open. */
+let dockTimer: Timer | null = null
+/** The model tools registered so far: each is offered to the model only once its feature is first turned on. */
+const registeredTools = new Set<string>()
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
 
@@ -116,6 +122,42 @@ let hasLoggedScanError = false
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Whether a bar option is on and the bar shown: work that only feeds the bar is skipped otherwise. */
+async function isShown($: EngineInterface, keys: ToggleKey | readonly ToggleKey[]): Promise<boolean> {
+  if (await read($, isHidden)) {
+    return false
+  }
+  const current = normalizeSettings(await read($, settings))
+
+  return (typeof keys === 'string' ? [keys] : keys).some(key => current[key])
+}
+
+/** The options whose figures come from the transcript scan: the month's cost, the thread's tokens, the week's share. */
+const SCAN_KEYS: readonly ToggleKey[] = ['monthlyCost', 'threadTokens', 'threadPercent']
+/** The options that show the session's cost. */
+const COST_KEYS: readonly ToggleKey[] = ['threadCost', 'lastTurnCost', 'threadPercent']
+
+/** Whether the mascot is drawn anywhere: its option on, the bar shown, and a surface that draws SVG attached. */
+async function isMascotOn($: EngineInterface): Promise<boolean> {
+  if (!(await isShown($, 'mascot'))) {
+    return false
+  }
+
+  return (await $.session.surfaces().catch(() => [])).some(surface => surface !== 'terminal')
+}
+
+/** Offers one of the mod's tools to the model, the first time its feature is turned on in this load. */
+async function registerTool($: EngineInterface, spec: Parameters<EngineInterface['tool']['register']>[0]): Promise<void> {
+  if (registeredTools.has(spec.name)) {
+    return
+  }
+  registeredTools.add(spec.name)
+  await $.tool.register(spec).catch(err => {
+    registeredTools.delete(spec.name)
+    $.ui.log(`aitools: ${spec.name} tool not registered: ${errorText(err)}`)
+  })
 }
 
 function toWindow(limit: { percentUsed: number; resetsAt?: string } | undefined): LimitWindow | undefined {
@@ -202,8 +244,15 @@ async function restoreCacheAt($: EngineInterface): Promise<void> {
   }
 }
 
+/** Scans the transcripts soon, if any option showing their figures is on. */
 function startScan($: EngineInterface): void {
-  $.clock.after(0, () => void scan($))
+  $.clock.after(0, () => void scanIfShown($))
+}
+
+async function scanIfShown($: EngineInterface): Promise<void> {
+  if (await isShown($, SCAN_KEYS)) {
+    await scan($)
+  }
 }
 
 /** Asks a fork of this conversation for the brief: the brief, or the failure's text. Null while one is already running. */
@@ -300,14 +349,53 @@ async function toggleSetting($: EngineInterface, key: keyof typeof DEFAULT_SETTI
     return { ...was, [key]: !was[key] }
   })
   await saveSettings(storeOf($), normalizeSettings(changed))
+  if (normalizeSettings(changed)[key]) {
+    await catchUp($, key)
+  }
 }
 
+/**
+ * Brings a feature up to date once it is turned on, or the whole bar once it is shown again (`key` absent): the work
+ * skipped while it was off.
+ */
+async function catchUp($: EngineInterface, key?: ToggleKey): Promise<void> {
+  startScan($)
+  if ((key === undefined || COST_KEYS.includes(key)) && (await isShown($, COST_KEYS))) {
+    const cost = (await $.session.usage()).cost?.usd
+    if (cost !== undefined) {
+      await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost }))
+    }
+  }
+  if (key === 'cacheWarmth') {
+    // Its time was not kept while it was off: unknown until the next request.
+    await update($, cacheAt, () => null)
+  }
+  if ((key === undefined || key === 'mascot') && (await isMascotOn($))) {
+    await syncMascot($)
+  }
+}
 /** The 🛠 menu's Task View and Clean View: sets the view, saves it for later sessions and closes the menu. */
 async function setView($: EngineInterface, mode: ViewMode): Promise<void> {
   await update($, isToolsOpen, () => false)
   await update($, viewMode, () => mode)
   await $.store.set('viewMode', mode)
   await showStatus($)
+  await startView($, mode)
+}
+
+/**
+ * What a view needs once it is on: the checklist tool offered to the model, and for Clean View the final replies so
+ * far (only kept while it is on).
+ */
+async function startView($: EngineInterface, mode: ViewMode): Promise<void> {
+  if (mode === 'off') {
+    return
+  }
+  await registerTool($, CHECKLIST_SPEC)
+  if (mode === 'clean') {
+    const earlier = finalReplies(await $.session.messages().catch(() => []))
+    await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
+  }
 }
 
 /**
@@ -351,7 +439,20 @@ async function setDockOpen($: EngineInterface, isOpen: boolean): Promise<void> {
   } else {
     await $.ui.close({ id: DOCK_PANE })
   }
+  await syncDock($)
   await showStatus($)
+}
+
+/** Runs the dock's work only while it is open: its once-a-second redraw timer, and its progress tool offered. */
+async function syncDock($: EngineInterface): Promise<void> {
+  if (!(await read($, isDockOpen))) {
+    dockTimer?.cancel()
+    dockTimer = null
+    return
+  }
+  // Helper times tick each second, but only while a helper runs.
+  dockTimer ??= $.clock.every(1000, () => void bumpDockTick($))
+  await registerTool($, PROGRESS_SPEC)
 }
 
 /**
@@ -365,6 +466,7 @@ async function isDockActive($: EngineInterface): Promise<boolean> {
   const pane = (await $.ui.panes()).find(p => p.id === DOCK_PANE)
   if (pane === undefined) {
     await update($, isDockOpen, () => false)
+    await syncDock($)
   }
   await showStatus($)
 
@@ -460,6 +562,9 @@ async function reportRun($: EngineInterface): Promise<void> {
  * gives way to. Showing the pose already up only changes what it gives way to.
  */
 async function showMascot($: EngineInterface, pose: MascotPose, rest: MascotPose = pose): Promise<void> {
+  if (!(await isMascotOn($))) {
+    return
+  }
   const now = await $.clock.now()
   // Checked inside the update, so two calls at once (parallel tool calls) change the pose once.
   let isChanged = false
@@ -497,10 +602,20 @@ async function restingPose($: EngineInterface): Promise<MascotPose> {
   return (await read($, asking)) > 0 || (await read($, isQuestionOpen)) ? 'puzzled' : 'idle'
 }
 
+/**
+ * Where the mascot should be when he is turned on: his poses were not followed while he was off, so the question
+ * left open is read back from the conversation.
+ */
+async function syncMascot($: EngineInterface): Promise<void> {
+  const isAsked = isQuestionOpenIn(await $.session.messages().catch(() => []))
+  await update($, isQuestionOpen, () => isAsked)
+  await showMascot($, isTurnRunning ? 'working' : await restingPose($))
+}
+
 /** Standing idle long enough, the mascot sits down and falls asleep; the person's next prompt wakes him. */
 async function checkSleep($: EngineInterface): Promise<void> {
   const shown = await read($, mascot)
-  if (shown.pose === 'idle' && (await $.clock.now()) - shown.since >= SLEEP_AFTER_MS) {
+  if (shown.pose === 'idle' && (await $.clock.now()) - shown.since >= SLEEP_AFTER_MS && (await isMascotOn($))) {
     await showMascot($, 'sleeping')
   }
 }
@@ -521,6 +636,14 @@ async function toggleMenu($: EngineInterface, menu: 'tools' | 'settings'): Promi
   } else if (await update($, isSettingsOpen, open => !open)) {
     await update($, isToolsOpen, () => false)
   }
+}
+
+/** Every 30 s: countdowns redraw while the bar shows; the mascot may fall asleep. */
+async function onTick($: EngineInterface): Promise<void> {
+  if (!(await read($, isHidden))) {
+    await update($, tick, n => (n ?? 0) + 1)
+  }
+  await checkSleep($)
 }
 
 /** The mascot drawing last built: it only changes with the pose, so redraws of the bar reuse it. */
@@ -575,7 +698,8 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
 
 async function measure($: EngineInterface, e: { rateLimits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]; context: Snapshot['context'] & {}; cost?: { usd: number } }) {
   const previous = await read($, snapshot)
-  const cache = e.cost ? null : await readCache($)
+  // Off the subscription's ledger, the session's cost comes from the last scan, if a cost is shown at all.
+  const cache = e.cost || !(await isShown($, COST_KEYS)) ? null : await readCache($)
   const fallback = cache ? sessionUsd(cache, await $.session.id()) : undefined
   const snap: Snapshot = {
     fiveHour: toWindow(e.rateLimits.find(r => r.kind === 'five_hour')) ?? previous?.fiveHour,
@@ -587,8 +711,16 @@ async function measure($: EngineInterface, e: { rateLimits: readonly { kind: str
     lastTurnTokens: previous?.lastTurnTokens,
   }
   await update($, snapshot, () => snap)
-  await $.store.set('lastSnapshot', snap)
-
+  // Kept for the next session's first figures; only the usage limits are read back.
+  if (await isShown($, ['fiveHour', 'weekly'])) {
+    await $.store.set('lastSnapshot', snap)
+  }
+  // The projection samples the 5-hour usage only while it is shown: turned on, it has a projection again once two
+  // responses an hour apart or so have been sampled.
+  if (!(await isShown($, 'burnRate'))) {
+    await update($, projection, () => null)
+    return
+  }
   const now = await $.clock.now()
   let burn = ((await $.store.get('burn')) as BurnState | undefined) ?? EMPTY_BURN
   if (snap.fiveHour) {
@@ -615,34 +747,35 @@ export const register: Register = on => {
       }
       await update($, snapshot, () => fresh)
     }
-    await restoreCacheAt($)
-    // The tick also checks whether the mascot has stood idle long enough to fall asleep.
-    $.clock.every(TICK_MS, () => {
-      void update($, tick, n => (n ?? 0) + 1)
-      void checkSleep($)
-    })
     const hidden = (await $.store.get('isHidden')) === true
     await update($, isHidden, () => hidden)
+    if (await isShown($, 'cacheWarmth')) {
+      await restoreCacheAt($)
+    }
+    // The tick redraws countdowns while the bar shows, and checks whether the mascot has stood idle long enough to
+    // fall asleep.
+    $.clock.every(TICK_MS, () => void onTick($))
     await $.command.register({ name: 'aitools', description: 'Show or hide the aitools bar', argumentHint: '[on|off]' })
     const savedView = await $.store.get('viewMode')
     const view: ViewMode = savedView === 'task' || savedView === 'clean' ? savedView : 'off'
     await update($, viewMode, () => view)
     await showStatus($)
-    // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back.
-    const rows = await $.session.messages().catch(() => [])
-    const earlier = finalReplies(rows)
-    await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
-    const isAsked = isQuestionOpenIn(rows)
-    await update($, isQuestionOpen, () => isAsked)
-    // A new session starts the mascot waving. A reload keeps his pose, but its timers went with the old module: a
-    // moment pose gives way now and a transition still playing is dropped.
-    const shown = await read($, mascot)
-    if (shown.change === 0) {
-      await showMascot($, 'wave', await restingPose($))
-    } else if (ONE_SHOT_MS[shown.pose] !== undefined) {
-      await showMascot($, shown.rest)
-    } else {
-      await settleMascot($, shown.change)
+    // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back, for
+    // what is on.
+    await startView($, view)
+    if (await isMascotOn($)) {
+      const isAsked = isQuestionOpenIn(await $.session.messages().catch(() => []))
+      await update($, isQuestionOpen, () => isAsked)
+      // A new session starts the mascot waving. A reload keeps his pose, but its timers went with the old module: a
+      // moment pose gives way now and a transition still playing is dropped.
+      const shown = await read($, mascot)
+      if (shown.change === 0) {
+        await showMascot($, 'wave', await restingPose($))
+      } else if (ONE_SHOT_MS[shown.pose] !== undefined) {
+        await showMascot($, shown.rest)
+      } else {
+        await settleMascot($, shown.change)
+      }
     }
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
@@ -660,24 +793,24 @@ export const register: Register = on => {
     if ((await read($, isDockOpen)) && !(await $.ui.panes()).some(p => p.id === DOCK_PANE)) {
       await $.ui.open({ id: DOCK_PANE, title: 'Agent Dock' })
     }
-    // Helper times tick each second, but only while a helper runs.
-    $.clock.every(1000, () => void bumpDockTick($))
+    await syncDock($)
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
-    // Last, and caught: without the checklist tool the views still hide rows and the bar still runs.
-    await $.tool.register(CHECKLIST_SPEC).catch(err => $.ui.log(`aitools: checklist tool not registered: ${errorText(err)}`))
-    await $.tool.register(PROGRESS_SPEC).catch(err => $.ui.log(`aitools: agent_progress tool not registered: ${errorText(err)}`))
 
     return next(e)
   })
 
   on('turn.start', async ($, e, next) => {
+    isTurnRunning = true
     if ((await read($, asking)) === 0) {
       await showMascot($, 'working')
     }
-    const cost = (await $.session.usage()).cost?.usd
-    if (cost !== undefined) {
-      await update($, turnBaseline, () => ({ turnId: e.turnId, usd: cost }))
+    // The cost when the turn started: the last-turn cost's baseline, only while it is shown.
+    if (await isShown($, 'lastTurnCost')) {
+      const cost = (await $.session.usage()).cost?.usd
+      if (cost !== undefined) {
+        await update($, turnBaseline, () => ({ turnId: e.turnId, usd: cost }))
+      }
     }
 
     return next(e)
@@ -691,11 +824,16 @@ export const register: Register = on => {
 
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
-      const at = await $.clock.now()
-      await update($, cacheAt, () => at)
-      await update($, mainEffort, () => e.effort ?? null)
-      // Persisting is a nicety (survives reloads); it must never hold up the model request.
-      await rememberCacheAt($, at).catch(() => undefined)
+      if (await isShown($, 'cacheWarmth')) {
+        const at = await $.clock.now()
+        await update($, cacheAt, () => at)
+        // Persisting is a nicety (survives reloads); it must never hold up the model request.
+        await rememberCacheAt($, at).catch(() => undefined)
+      }
+      // The chat's effort is what Same as chat helpers run at: kept while the dock is open.
+      if (await read($, isDockOpen)) {
+        await update($, mainEffort, () => e.effort ?? null)
+      }
 
       return yield* next(e)
     }
@@ -718,18 +856,25 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
       const id = e.agentId
-      const known = (await read($, agentRun))?.cards.some(c => c.id === id) ?? false
-      await traceDock($, `finished ${id} (${e.reason})${known ? '' : ', no card'}`)
-      await endHelper($, id, e.reason === 'answer')
+      // Only the dock's own helpers have a card; any other subagent finishing is none of its business.
+      if (liveHelpers.has(id) || ((await read($, agentRun))?.cards.some(c => c.id === id) ?? false)) {
+        await traceDock($, `finished ${id} (${e.reason})`)
+        await endHelper($, id, e.reason === 'answer')
+      }
 
       return next(e)
     }
-    await update($, finals, list => addFinal(list, e.answer))
-    // A finished answer is celebrated, unless it asks something; a turn that failed or was interrupted startles him.
-    const isAsked = e.reason === 'answer' && endsWithQuestion(e.answer)
-    await update($, isQuestionOpen, () => isAsked)
-    const rest = await restingPose($)
-    await showMascot($, e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate', rest)
+    isTurnRunning = false
+    if ((await read($, viewMode)) === 'clean') {
+      await update($, finals, list => addFinal(list, e.answer))
+    }
+    if (await isMascotOn($)) {
+      // A finished answer is celebrated, unless it asks something; a turn that failed or was interrupted startles him.
+      const isAsked = e.reason === 'answer' && endsWithQuestion(e.answer)
+      await update($, isQuestionOpen, () => isAsked)
+      const rest = await restingPose($)
+      await showMascot($, e.reason !== 'answer' ? 'error' : isAsked ? 'puzzled' : 'celebrate', rest)
+    }
     const baseline = await read($, turnBaseline)
     const base = baseline?.turnId === e.turnId ? baseline.usd : undefined
     await update($, turnBaseline, () => null)
@@ -737,10 +882,12 @@ export const register: Register = on => {
       const lastTurnTokens = usageTokens(e.usage)
       await update($, snapshot, snap => ({ ...(snap ?? {}), lastTurnTokens }))
     }
-    const cost = (await $.session.usage()).cost?.usd
-    if (cost !== undefined) {
-      const lastTurnUsd = base === undefined ? undefined : cost - base
-      await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost, lastTurnUsd }))
+    if (await isShown($, COST_KEYS)) {
+      const cost = (await $.session.usage()).cost?.usd
+      if (cost !== undefined) {
+        const lastTurnUsd = base === undefined ? undefined : cost - base
+        await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost, lastTurnUsd }))
+      }
     }
     startScan($)
     await reportRun($)
@@ -755,6 +902,9 @@ export const register: Register = on => {
     }
     await update($, isHidden, () => hidden)
     await $.store.set('isHidden', hidden)
+    if (!hidden) {
+      await catchUp($)
+    }
 
     return { text: hidden ? 'aitools bar hidden. Run /aitools to show it.' : 'aitools bar shown.' }
   })
@@ -888,6 +1038,7 @@ export const register: Register = on => {
   on('ui.close', async ($, e, next) => {
     if (e.id === DOCK_PANE && e.origin.kind === 'person') {
       await update($, isDockOpen, () => false)
+      await syncDock($)
       await showStatus($)
     }
 
@@ -897,7 +1048,7 @@ export const register: Register = on => {
   // The mascot follows the main chat's tools: reading while a read-only tool runs, puzzled while an AskUserQuestion
   // dialog waits (its `next` resolves once answered), startled when a call fails or is refused.
   on('tool.call', async ($, e, next) => {
-    if (e.agentId !== undefined || QUIET_TOOLS.has(e.tool)) {
+    if (e.agentId !== undefined || QUIET_TOOLS.has(e.tool) || !(await isMascotOn($))) {
       return next(e)
     }
     if (e.tool === 'AskUserQuestion') {
