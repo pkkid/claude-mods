@@ -169,11 +169,11 @@ type El = Pick<Elements['terminal'], 'Box' | 'Text'>
 
 const MARKS = { done: '✓', doing: '●', todo: '○' } as const
 /** Done marks green, the step in progress blue (the mod's own shades); steps not started stay dim. */
-const GREEN = '#538d37'
-const BLUE = '#478487'
+export const GREEN = '#6fbe49'
+export const BLUE = '#478487'
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 /** The step in progress: a grey between dim and full white, so it stands out without glaring. */
-const DOING_TEXT = '#b0b0b0'
+export const DOING_TEXT = '#b0b0b0'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
 export function renderChecklist(el: El, list: Checklist | null, isWorking: boolean) {

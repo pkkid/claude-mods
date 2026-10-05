@@ -49,3 +49,12 @@ export function clockTime(ms: number): string {
 
   return `${hours % 12 || 12}:${minutes}${hours < 12 ? 'am' : 'pm'}`
 }
+
+/** Minutes and seconds, `1:05`, or hours too once past an hour; a clock-style running time. */
+export function elapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const [h, m, sec] = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+  const pad = (n: number) => String(n).padStart(2, '0')
+
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
+}

@@ -42,8 +42,8 @@ Threshold alerts are one-time toasts when the 5-hour or weekly window passes 90%
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Workflows**, **Task View** and **Clean View**,
-right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
+The **🛠** button opens a row above the bar with **Handoff**, **Workflows**, **Task View**, **Clean View** and
+**Agent Dock**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it). **Workflows** runs Claude Code's built-in `/workflows` directly where the
 engine has it (the terminal); in the desktop Code tab, which answers a typed `/workflows` itself, it puts `/workflows`
@@ -56,7 +56,8 @@ above it): done steps marked with a green ✓, the step in progress with a blue 
 In the menu a ● marks the view that is on and a ○ the one that is off; picking the one that is on turns it off, and
 picking the other switches. The choice holds across sessions.
 
-While one is on, its name shows in the status line under the prompt. `/taskview` and `/cleanview` do the same as the
+While one is on, its name shows in the status line under the prompt (with `Agent Dock` after a comma while the
+dock is open). `/taskview` and `/cleanview` do the same as the
 menu from the prompt: no argument toggles that view (turning it on switches off the other), `on` turns it on and `off`
 turns it off.
 
@@ -86,6 +87,36 @@ needs no work gets no checklist.
 Clean View recognizes a final reply as the last thing Claude wrote before your next prompt. It reads them from the
 conversation when the mod loads (so replies from before a reload or restart still show) and adds each new one as a
 request finishes.
+
+## Agent Dock
+
+`/agentdock`, or **Agent Dock** in the **🛠** menu (● while open), opens the Agent Dock pane for handing a big job to a
+team of helper agents (extra copies of Claude working in parallel); either again, or the pane's own close mark, closes
+it. It stays open until you close it, and comes back after the mod reloads. While the dock is closed, or its pane is
+not on screen (the status line then reads `Agent Dock (not shown)`), nothing below applies.
+
+```
+Team size: ○ 1 ○ 3 ● 5 ○ 10 ○ 20 ○ 30   Helpers: ● Fast & cheap ○ Same as chat
+
+5 agents · 3 working · 2 idle · 1 queued · 1 done
+● Research business licenses · Reading the city site               40% ▰▰▰▰▱▱▱▱▱▱  1:20
+✓ Draft the floor plan                                             100% ▰▰▰▰▰▰▰▰▰▰  0:56
+```
+
+- **Team**: how many helpers may run at once (1, 3, 5, 10, 20 or 30). Past 10 the dock warns in yellow that a big team
+  uses your Claude usage much faster.
+- **Helpers**: **Fast & cheap** runs every helper request on Sonnet 5.5 at low reasoning; **Same as chat** uses the
+  chat's model and reasoning level.
+- While the dock is open, each prompt carries a hidden note asking Claude to split a job with separate parts across
+  the team, starting the pieces in parallel. Each helper's prompt asks it to report what it is doing and how far along
+  it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`), which fills its card.
+- A full team refuses further starts with a note to try again when a helper finishes (a hook may not hold a start for
+  long); those pieces count as queued until they start.
+- Cards show the task, what the helper is doing, its percent (its own estimate), a bar and its running time; a
+  running helper's text is a mid grey, finished ones get a green ✓ and failed ones a red ✕. When every helper is done
+  and Claude has replied, a line under the cards says how long they took (`All 3 helpers finished in 6 to 10 seconds
+  each.`). The cards and that line stay until your next prompt.
+- The team and helper picks are saved; the dock itself starts closed in a new session.
 
 ## How monthly cost is computed
 

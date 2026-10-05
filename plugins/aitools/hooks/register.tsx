@@ -3,6 +3,24 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { EMPTY_ALERTS, checkAlerts } from '../src/alerts'
 import type { AlertState } from '../src/alerts'
+import {
+  FAST_EFFORT,
+  FAST_MODEL,
+  HELPER_LABELS,
+  HELPER_NOTE,
+  PROGRESS_SPEC,
+  PROGRESS_TOOL_ID,
+  DOCK_PANE,
+  addCard,
+  dockNote,
+  finishCard,
+  isRunning,
+  isTeamSize,
+  newRun,
+  queuePiece,
+  renderDock,
+  reportProgress,
+} from '../src/agentdock'
 import { renderBar } from '../src/bar'
 import {
   CHECKLIST_SPEC,
@@ -23,7 +41,7 @@ import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSett
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionUsd } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
-import type { Brief, LimitWindow, Snapshot, ViewMode } from '../types'
+import type { Brief, HelperMode, LimitWindow, Snapshot, TeamSize, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
 // function that touches `$` lives here; src/ holds the pure units.
@@ -43,8 +61,32 @@ const brief = atom({ plugin: 'aitools', key: 'brief' } as const, null)
 const viewMode = atom({ plugin: 'aitools', key: 'viewMode' } as const, 'off')
 const checklist = atom({ plugin: 'aitools', key: 'checklist' } as const, null)
 const finals = atom({ plugin: 'aitools', key: 'finals' } as const, [])
+const isDockOpen = atom({ plugin: 'aitools', key: 'isDockOpen' } as const, false)
+const team = atom({ plugin: 'aitools', key: 'team' } as const, 5)
+const helpers = atom({ plugin: 'aitools', key: 'helpers' } as const, 'fast')
+const agentRun = atom({ plugin: 'aitools', key: 'agentRun' } as const, null)
+const mainEffort = atom({ plugin: 'aitools', key: 'mainEffort' } as const, null)
+const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
 
 const HANDOFF_PANE = 'handoff'
+
+/** Prompt origins that are the person's own words; anything else (a helper's report, a notice) is not a new request. */
+const PERSON_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
+/** How many Agent Dock trace lines the store keeps. */
+const TRACE_KEEP = 60
+/** How long a helper's first model request waits for its own start to be recorded, at most. */
+const SPAWN_WAIT_MS = 2000
+
+/**
+ * Agent Dock bookkeeping that must change without an `await` between check and write, so helpers started together
+ * in one message see each other: the team places taken by starts still in flight, the helpers with a running card,
+ * and the starts in flight, which a helper's first model request may wait on before its card exists.
+ */
+let reservedPlaces = 0
+const liveHelpers = new Set<string>()
+const startsInFlight = new Set<Promise<void>>()
+/** Trace writes run one after another, so lines written at once are all kept. */
+let traceQueue: Promise<void> = Promise.resolve()
 
 const encoder = new TextEncoder()
 const TICK_MS = 30_000
@@ -246,12 +288,21 @@ async function setView($: EngineInterface, mode: ViewMode): Promise<void> {
   await update($, isToolsOpen, () => false)
   await update($, viewMode, () => mode)
   await $.store.set('viewMode', mode)
-  showViewStatus($, mode)
+  await showStatus($)
 }
 
-/** Names the view that is on in the status line under the prompt; clears it when both are off. */
-function showViewStatus($: EngineInterface, mode: ViewMode): void {
-  $.ui.status(mode === 'off' ? undefined : VIEW_NAMES[mode])
+/**
+ * The status line under the prompt: the view that is on and the Agent Dock, comma separated; cleared when none. A dock
+ * whose pane is open but not on screen (waiting for room) applies nothing, and says so.
+ */
+async function showStatus($: EngineInterface): Promise<void> {
+  const mode = await read($, viewMode)
+  const parts: string[] = mode === 'off' ? [] : [VIEW_NAMES[mode]]
+  if (await read($, isDockOpen)) {
+    const pane = (await $.ui.panes()).find(p => p.id === DOCK_PANE)
+    parts.push(pane?.isPlaced === false ? 'Agent Dock (not shown)' : 'Agent Dock')
+  }
+  $.ui.status(parts.length > 0 ? parts.join(', ') : undefined)
 }
 
 /** /taskview and /cleanview: toggles the view, or sets it with on/off, and says what is on now. */
@@ -264,6 +315,125 @@ async function viewCommand($: EngineInterface, view: 'task' | 'clean', args: str
   await setView($, mode)
 
   return { text: mode === 'off' ? `${name} off.` : `${VIEW_NAMES[mode]} on.` }
+}
+
+/** Redraws the dock's helper times, only while a helper runs. */
+async function bumpDockTick($: EngineInterface): Promise<void> {
+  if (isRunning(await read($, agentRun))) {
+    await update($, dockTick, n => n + 1)
+  }
+}
+
+/** Opens or closes the Agent Dock pane; closed, none of its settings apply. */
+async function setDockOpen($: EngineInterface, isOpen: boolean): Promise<void> {
+  await update($, isDockOpen, () => isOpen)
+  if (isOpen) {
+    await $.ui.open({ id: DOCK_PANE, title: 'Agent Dock' })
+  } else {
+    await $.ui.close({ id: DOCK_PANE })
+  }
+  await showStatus($)
+}
+
+/**
+ * Whether the dock applies: it is open and its pane is on screen. A dock pane that went away turns it off; one that is
+ * open but not on screen applies nothing, which the status line says.
+ */
+async function isDockActive($: EngineInterface): Promise<boolean> {
+  if (!(await read($, isDockOpen))) {
+    return false
+  }
+  const pane = (await $.ui.panes()).find(p => p.id === DOCK_PANE)
+  if (pane === undefined) {
+    await update($, isDockOpen, () => false)
+  }
+  await showStatus($)
+
+  return pane?.isPlaced === true
+}
+
+/** The 🛠 menu's Agent Dock: opens the dock if closed, closes it if open, and closes the menu. */
+async function toggleDock($: EngineInterface): Promise<boolean> {
+  await update($, isToolsOpen, () => false)
+  const isOpen = !(await read($, isDockOpen))
+  await setDockOpen($, isOpen)
+
+  return isOpen
+}
+
+/** The dock's team size, saved for later sessions. */
+async function setTeam($: EngineInterface, size: TeamSize): Promise<void> {
+  await update($, team, () => size)
+  await $.store.set('agentTeam', size)
+}
+
+/** The dock's helper model, saved for later sessions. */
+async function setHelpers($: EngineInterface, mode: HelperMode): Promise<void> {
+  await update($, helpers, () => mode)
+  await $.store.set('agentHelpers', mode)
+}
+
+/** Appends one line to the Agent Dock trace in the store, the newest TRACE_KEEP kept, one write after another. */
+function traceDock($: EngineInterface, line: string): Promise<void> {
+  traceQueue = traceQueue.then(() => appendTrace($, line)).catch(() => undefined)
+
+  return traceQueue
+}
+
+/** Reads the trace, adds one timed line and writes it back; only ever run through traceDock's queue. */
+async function appendTrace($: EngineInterface, line: string): Promise<void> {
+  const at = new Date(await $.clock.now()).toISOString().slice(11, 19)
+  const trace = ((await $.store.get('dockTrace')) as string[] | undefined) ?? []
+  await $.store.set('dockTrace', [...trace, `${at} ${line}`].slice(-TRACE_KEEP))
+}
+
+/** Waits for `work`, or `ms` at most, whichever comes first. */
+function waitAtMost($: EngineInterface, work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise(resolve => {
+    $.clock.after(ms, () => resolve())
+    void work.then(() => resolve(), () => resolve())
+  })
+}
+
+/** Marks a helper finished: its place on the team frees up and its card turns done or failed. */
+async function endHelper($: EngineInterface, id: string, isAnswered: boolean): Promise<void> {
+  liveHelpers.delete(id)
+  const now = await $.clock.now()
+  await update($, agentRun, run => (run === null ? run : finishCard(run, id, isAnswered, now)))
+}
+
+/** Marks done or failed any card whose helper the engine no longer has running, in case its finish was never heard. */
+async function settleCards($: EngineInterface): Promise<void> {
+  const run = await read($, agentRun)
+  if (!isRunning(run)) {
+    return
+  }
+  const agents = await $.agent.list().catch(() => null)
+  if (agents === null) {
+    return
+  }
+  // A helper the engine no longer lists has finished too; only one listed as running or pending is still at work.
+  for (const card of run?.cards.filter(c => c.status === 'running') ?? []) {
+    const status = agents.find(a => a.id === card.id)?.status ?? 'gone'
+    if (status !== 'running' && status !== 'pending') {
+      await traceDock($, `settled ${card.task}: ${status}`)
+      await endHelper($, card.id, status !== 'failed' && status !== 'killed')
+    }
+  }
+}
+
+/** Once every helper of a run has finished and Claude has replied, marks it reported: the dock adds its finish line. */
+async function reportRun($: EngineInterface): Promise<void> {
+  await settleCards($)
+  const run = await read($, agentRun)
+  if (run === null || run.cards.length === 0 || run.isReported || isRunning(run)) {
+    if (run !== null && run.cards.length > 0 && !run.isReported) {
+      await traceDock($, `not reported yet: ${run.cards.filter(c => c.status === 'running').length} still running`)
+    }
+    return
+  }
+  await traceDock($, `reported ${run.cards.length} helpers`)
+  await update($, agentRun, r => (r === null ? r : { ...r, isReported: true }))
 }
 
 /** Draws nothing in a transcript row's place: how Clean View hides tool calls and in-progress replies. */
@@ -303,6 +473,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isToolsOpen: await read($, isToolsOpen),
     isSettingsOpen: await read($, isSettingsOpen),
     viewMode: await read($, viewMode),
+    isDockOpen: await read($, isDockOpen),
   }
   const list = flags.viewMode === 'off' ? null : renderChecklist(el, await read($, checklist), isWorking)
 
@@ -312,6 +483,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     workflows: () => void runWorkflows($),
     toggleSettings: () => void toggleMenu($, 'settings'),
     setView: mode => void setView($, mode),
+    toggleDock: () => void toggleDock($),
     toggle: key => void toggleSetting($, key),
   }, list)
 }
@@ -373,16 +545,33 @@ export const register: Register = on => {
     const savedView = await $.store.get('viewMode')
     const view: ViewMode = savedView === 'task' || savedView === 'clean' ? savedView : 'off'
     await update($, viewMode, () => view)
-    showViewStatus($, view)
+    await showStatus($)
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back.
     const earlier = finalReplies(await $.session.messages().catch(() => []))
     await update($, finals, list => earlier.reduce((acc, text) => addFinal(acc, text), list))
     await $.command.register({ name: 'taskview', description: 'Turn Task View on or off', argumentHint: '[on|off]' })
     await $.command.register({ name: 'cleanview', description: 'Turn Clean View on or off', argumentHint: '[on|off]' })
+    const savedTeam = await $.store.get('agentTeam')
+    const savedHelpers = await $.store.get('agentHelpers')
+    await update($, team, () => (isTeamSize(savedTeam) ? savedTeam : 5))
+    await update($, helpers, () => (savedHelpers === 'same' ? 'same' : 'fast'))
+    await $.command.register({ name: 'agentdock', description: 'Open or close the Agent Dock' })
+    // A reload starts the module's bookkeeping over: the running cards are the helpers still at work.
+    liveHelpers.clear()
+    for (const card of (await read($, agentRun))?.cards ?? []) {
+      if (card.status === 'running') liveHelpers.add(card.id)
+    }
+    // A reload takes the dock pane down with the old module; the dock stays open until the person closes it.
+    if ((await read($, isDockOpen)) && !(await $.ui.panes()).some(p => p.id === DOCK_PANE)) {
+      await $.ui.open({ id: DOCK_PANE, title: 'Agent Dock' })
+    }
+    // Helper times tick each second, but only while a helper runs.
+    $.clock.every(1000, () => void bumpDockTick($))
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
     // Last, and caught: without the checklist tool the views still hide rows and the bar still runs.
     await $.tool.register(CHECKLIST_SPEC).catch(err => $.ui.log(`aitools: checklist tool not registered: ${errorText(err)}`))
+    await $.tool.register(PROGRESS_SPEC).catch(err => $.ui.log(`aitools: agent_progress tool not registered: ${errorText(err)}`))
 
     return next(e)
   })
@@ -406,15 +595,35 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const at = await $.clock.now()
       await update($, cacheAt, () => at)
+      await update($, mainEffort, () => e.effort ?? null)
       // Persisting is a nicety (survives reloads); it must never hold up the model request.
       await rememberCacheAt($, at).catch(() => undefined)
-    }
 
-    return yield* next(e)
+      return yield* next(e)
+    }
+    // An Agent Dock helper: every request it makes runs on the dock's model and effort. Its first request can come
+    // before its start is recorded, so an unknown helper waits briefly for the starts still in flight.
+    if (!liveHelpers.has(e.agentId) && startsInFlight.size > 0) {
+      await waitAtMost($, Promise.all(startsInFlight), SPAWN_WAIT_MS)
+    }
+    if (!liveHelpers.has(e.agentId)) {
+      return yield* next(e)
+    }
+    if ((await read($, helpers)) === 'fast') {
+      return yield* next({ ...e, model: FAST_MODEL, effort: FAST_EFFORT })
+    }
+    const effort = await read($, mainEffort)
+
+    return yield* next(effort === null ? e : { ...e, effort })
   })
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) {
+      const id = e.agentId
+      const known = (await read($, agentRun))?.cards.some(c => c.id === id) ?? false
+      await traceDock($, `finished ${id} (${e.reason})${known ? '' : ', no card'}`)
+      await endHelper($, id, e.reason === 'answer')
+
       return next(e)
     }
     await update($, finals, list => addFinal(list, e.answer))
@@ -427,6 +636,7 @@ export const register: Register = on => {
       await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost, lastTurnUsd }))
     }
     startScan($)
+    await reportRun($)
 
     return next(e)
   })
@@ -468,17 +678,112 @@ export const register: Register = on => {
     )
   })
 
-  // A view on: each new request starts a fresh checklist, and the note asks the model to keep it.
+  // The person's own prompt starts a new request, whatever is on: a fresh checklist, and the last helpers' cards
+  // cleared once none still runs. A helper's report or a task notice arrives as a prompt too, and starts nothing.
+  // A view or the dock on adds its note.
   on('prompt.submit', async ($, e, next) => {
-    const note = viewNote(await read($, viewMode))
-    if (note === null) {
+    if (PERSON_ORIGINS.has(e.origin.kind)) {
+      await update($, checklist, () => null)
+      if (!isRunning(await read($, agentRun)) && (await read($, agentRun)) !== null) {
+        await traceDock($, `reset by ${e.origin.kind} prompt`)
+        await update($, agentRun, () => null)
+      }
+    }
+    const notes: string[] = []
+    const view = viewNote(await read($, viewMode))
+    if (view !== null) notes.push(view)
+    if (await isDockActive($)) notes.push(dockNote(await read($, team)))
+
+    return notes.length === 0 ? next(e) : next({ ...e, context: [...(e.context ?? []), ...notes] })
+  })
+
+  // The dock open: a helper the main chat starts runs on the dock's model, reports progress, and waits its turn
+  // when the team is full (refused with a note: a hook may not hold the start for long).
+  on('agent.spawn', async ($, e, next) => {
+    if (e.fork || e.parentAgentId !== undefined) {
       return next(e)
     }
-    if (e.origin.kind !== 'plugin') {
-      await update($, checklist, () => null)
+    if (!(await isDockActive($))) {
+      if (await read($, isDockOpen)) await traceDock($, `ignored ${e.description}: dock pane not on screen`)
+      return next(e)
+    }
+    const now = await $.clock.now()
+    const size = await read($, team)
+    const model = (await read($, helpers)) === 'fast' ? FAST_MODEL : e.parentModel
+    // Check and take a place with no `await` in between, so starts in the same message count each other.
+    const working = liveHelpers.size + reservedPlaces
+    if (working >= size) {
+      await traceDock($, `queued ${e.description} (${working} of ${size} working)`)
+      await update($, agentRun, r => queuePiece(r ?? newRun(now), e.description))
+      return { deny: `Agent Dock: all ${size} helpers are busy. Start "${e.description}" again once one finishes.` }
+    }
+    reservedPlaces += 1
+    let settle = () => {}
+    const inFlight = new Promise<void>(resolve => (settle = resolve))
+    startsInFlight.add(inFlight)
+    try {
+      const started = await next({ ...e, model, prompt: e.prompt + HELPER_NOTE })
+      await traceDock($, `started ${e.description}: ${started.agentId ?? started.deny ?? 'no id'}`)
+      if (started.agentId !== undefined) {
+        const id = started.agentId
+        liveHelpers.add(id)
+        await update($, agentRun, r => addCard(r ?? newRun(now), id, e.description, now))
+      }
+
+      return started
+    } finally {
+      reservedPlaces -= 1
+      startsInFlight.delete(inFlight)
+      settle()
+    }
+  })
+
+  // A helper's own report: answered here, so it never asks for permission.
+  on('tool.call', { tool: PROGRESS_TOOL_ID }, async ($, e) => {
+    const id = e.agentId
+    if (id === undefined) {
+      return { deny: 'Only Agent Dock helpers report progress.' }
+    }
+    const doing = typeof e.doing === 'string' ? e.doing : ''
+    const percent = typeof e.percent === 'number' ? e.percent : 0
+    await update($, agentRun, run => (run === null ? run : reportProgress(run, id, doing, percent)))
+
+    return { result: 'Progress noted.' }
+  })
+
+  on('command.run', { command: 'agentdock' }, async $ => {
+    if (!(await toggleDock($))) {
+      return { text: 'Agent Dock closed.' }
+    }
+    const size = await read($, team)
+
+    return { text: `Agent Dock open: ${size} ${HELPER_LABELS[await read($, helpers)]} helper${size === 1 ? '' : 's'}.` }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: DOCK_PANE }, async ($, e) => {
+    await read($, dockTick)
+    const state = {
+      team: await read($, team),
+      helpers: await read($, helpers),
+      run: await read($, agentRun),
+      now: await $.clock.now(),
     }
 
-    return next({ ...e, context: [...(e.context ?? []), note] })
+    return renderDock($.ui.resolve(e), state, {
+      setTeam: size => void setTeam($, size),
+      setHelpers: mode => void setHelpers($, mode),
+    })
+  })
+
+  // The person closing the dock pane turns the dock off; the mod's own close has already, and an unload (a reload)
+  // leaves the setting for the pane the next load opens.
+  on('ui.close', async ($, e, next) => {
+    if (e.id === DOCK_PANE && e.origin.kind === 'person') {
+      await update($, isDockOpen, () => false)
+      await showStatus($)
+    }
+
+    return next(e)
   })
 
   // Answered here without `next`: the call never reaches a permission dialog, and nothing runs but this.

@@ -125,12 +125,20 @@ const QUIET = { plain: true, dimColor: true } as const
 export function renderBar(
   el: El,
   view: View,
-  flags: { isWorking: boolean; isHandingOff: boolean; isToolsOpen: boolean; isSettingsOpen: boolean; viewMode: ViewMode },
+  flags: {
+    isWorking: boolean
+    isHandingOff: boolean
+    isToolsOpen: boolean
+    isSettingsOpen: boolean
+    viewMode: ViewMode
+    isDockOpen: boolean
+  },
   on: {
     toggleTools(): void
     handoff(): void
     workflows(): void
     setView(mode: ViewMode): void
+    toggleDock(): void
     toggleSettings(): void
     toggle(key: ToggleKey): void
   },
@@ -199,6 +207,7 @@ export function renderBar(
             onPress={() => on.setView(flags.viewMode === v.mode ? 'off' : v.mode)}
           />
         ))}
+        <Button key="agentdock" label={`${flags.isDockOpen ? '●' : '○'} Agent Dock`} {...QUIET} onPress={() => on.toggleDock()} />
       </Box>
     )
   }
