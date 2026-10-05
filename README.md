@@ -7,7 +7,7 @@ The repo is a plugin marketplace, so every mod installs the same way.
 
 | Mod | What it does |
 |---|---|
-| [aicost](plugins/aicost) | Bar above the prompt: 5-hour / weekly subscription usage, context fill, and what this work would cost at API prices (thread, last turn, month). Toggleable segments, burn-rate projection, threshold alerts, and a Handoff button. |
+| [aitools](plugins/aitools) | Bar above the prompt: 5-hour / weekly subscription usage, context fill, and what this work would cost at API prices (thread, last turn, month). Toggleable segments, burn-rate projection, threshold alerts, and a Handoff button. |
 
 ## Install
 
@@ -15,7 +15,7 @@ In a Claude Code session:
 
 ```
 /plugin marketplace add ~/Projects/claude-mods
-/plugin install aicost@claude-mods
+/plugin install aitools@claude-mods
 ```
 
 ## Develop
@@ -26,7 +26,7 @@ Load mods straight from this checkout, with hot reload, by adding to the `env` b
 ```json
 {
   "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/claude-mods/plugins/aicost",
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/Projects/claude-mods/plugins/aitools",
     "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
   }
 }

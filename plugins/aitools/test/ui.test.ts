@@ -6,7 +6,7 @@ const SURFACES = ['terminal', 'desktop'] as const
 
 function band(surface: (typeof SURFACES)[number], over: { hasSurvey?: boolean; bodyColumns?: number } = {}) {
   return {
-    plugin: 'aicost',
+    plugin: 'aitools',
     surface,
     component: 'AbovePrompt' as const,
     props: {
@@ -32,58 +32,92 @@ describe('AbovePrompt band', () => {
     mock.clock(on, { now: NOW })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount(band(surface))
-      expect((await ui.find({ key: 'settings' }))?.text).toBe('...')
+      expect((await ui.find({ key: 'settings' }))?.text).toBe('⁝')
       expect(await ui.find({ text: /wk/ })).toBeDefined()
 
       await ui.press({ key: 'settings' })
-      expect(await ui.find({ text: 'aicost settings' })).toBeDefined()
+      expect(await ui.find({ key: 'weekly' })).toBeDefined()
+      expect(await ui.find({ text: /wk/ })).toBeDefined()
 
       await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe('[ ] Weekly usage')
+      expect((await ui.find({ key: 'weekly' }))?.text).toBe('○ Weekly usage')
 
       await ui.press({ key: 'weekly' })
-      expect((await ui.find({ key: 'weekly' }))?.text).toBe('[✓] Weekly usage')
+      expect((await ui.find({ key: 'weekly' }))?.text).toBe('● Weekly usage')
       await ui.press({ key: 'weekly' })
-
-      await ui.press({ key: 'done' })
-      expect(await ui.find({ key: 'settings' })).toBeDefined()
       expect(await ui.find({ text: /wk/ })).toBeUndefined()
 
       await ui.press({ key: 'settings' })
+      expect(await ui.find({ key: 'weekly' })).toBeUndefined()
+      expect(await ui.find({ key: 'settings' })).toBeDefined()
+
+      await ui.press({ key: 'settings' })
       await ui.press({ key: 'weekly' })
-      await ui.press({ key: 'done' })
+      await ui.press({ key: 'settings' })
       await ui.unmount()
     }
   })
 
-  test('the AI Cost label shows by default', async ($, on) => {
+  test('the display options come five to a row', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
     const ui = await $.ui.mount(band('desktop'))
-    expect(await ui.find({ text: 'AI Cost    ' })).toBeDefined()
+    await ui.press({ key: 'settings' })
+    const rows = []
+    for (let i = 0; (await ui.find({ key: `settings-row-${i}` })) !== undefined; i++) {
+      rows.push(await ui.find({ key: `settings-row-${i}` }))
+    }
+    await ui.unmount()
+    expect(rows.map(r => r?.children.length)).toEqual([5, 5, 4])
+  })
+
+  test('the AI Tools label shows by default', async ($, on) => {
+    coreBand(on)
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    const ui = await $.ui.mount(band('desktop'))
+    expect(await ui.find({ text: 'AI Tools    ' })).toBeDefined()
     await ui.unmount()
   })
 
-  test('the AI Cost label follows its toggle', async ($, on) => {
+  test('the AI Tools label follows its toggle', async ($, on) => {
     coreBand(on)
     mock.store(on, { settings: { label: false } })
     mock.clock(on, { now: NOW })
     on('session.start', (_, e) => ({ cwd: e.cwd }))
     await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount(band('desktop'))
-    expect(await ui.find({ text: 'AI Cost    ' })).toBeUndefined()
+    expect(await ui.find({ text: 'AI Tools    ' })).toBeUndefined()
     await ui.unmount()
   })
 
-  test('handoff button follows its toggle', async ($, on) => {
+  test('opening one menu closes the other', async ($, on) => {
+    coreBand(on)
+    mock.store(on, {})
+    mock.clock(on, { now: NOW })
+    const ui = await $.ui.mount(band('desktop'))
+    await ui.press({ key: 'tools' })
+    expect(await ui.find({ key: 'workflows' })).toBeDefined()
+
+    await ui.press({ key: 'settings' })
+    expect(await ui.find({ key: 'weekly' })).toBeDefined()
+    expect(await ui.find({ key: 'workflows' })).toBeUndefined()
+
+    await ui.press({ key: 'tools' })
+    expect(await ui.find({ key: 'workflows' })).toBeDefined()
+    expect(await ui.find({ key: 'weekly' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('tools menu follows its toggle', async ($, on) => {
     coreBand(on)
     mock.store(on, { settings: { handoffButton: false } })
     mock.clock(on, { now: NOW })
     on('session.start', (_, e) => ({ cwd: e.cwd }))
     await $.session.start({ cwd: '/p', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount(band('desktop'))
-    expect(await ui.find({ key: 'handoff' })).toBeUndefined()
+    expect(await ui.find({ key: 'tools' })).toBeUndefined()
     await ui.unmount()
   })
 

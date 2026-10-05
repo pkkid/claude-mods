@@ -6,8 +6,8 @@
   },
   "plugins": [
     {
-      "name": "aicost",
-      "source": "./plugins/aicost",
+      "name": "aitools",
+      "source": "./plugins/aitools",
       "description": "Subscription usage, API-equivalent cost and context bar above the prompt"
     }
   ]

@@ -1,8 +1,9 @@
 import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
+import type { renderChecklist } from './checklist'
 import { TOGGLES } from './settings'
-import type { MonthTotal, Settings, Snapshot, ToggleKey } from '../types'
+import type { MonthTotal, Settings, Snapshot, ToggleKey, ViewMode } from '../types'
 
 export type View = {
   snapshot: Snapshot | null
@@ -20,7 +21,7 @@ export type Segment = { key: string; text: string; tone?: Tone }
 
 export const SEPARATOR = '    '
 /** Names the mod at the start of the bar; the `label` toggle hides it. */
-export const LABEL = 'AI Cost'
+export const LABEL = 'AI Tools'
 
 /** Claude Code writes the main conversation's prompt cache with the 1-hour TTL; each request restarts it. */
 export const CACHE_TTL = 60 * 60_000
@@ -108,21 +109,38 @@ export function segments(view: View): Segment[] {
 
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
+/** The 🛠 menu's view options; picking the one that is on turns it off. */
+const VIEWS = [
+  { mode: 'task', label: 'Task View' },
+  { mode: 'clean', label: 'Clean View' },
+] as const
+
+/** How many display options the ⁝ menu puts on one row. */
+const SETTINGS_PER_ROW = 5
+
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
 const QUIET = { plain: true, dimColor: true } as const
 
 export function renderBar(
   el: El,
   view: View,
-  flags: { isWorking: boolean; isHandingOff: boolean },
-  on: { handoff(): void; openSettings(): void },
+  flags: { isWorking: boolean; isHandingOff: boolean; isToolsOpen: boolean; isSettingsOpen: boolean; viewMode: ViewMode },
+  on: {
+    toggleTools(): void
+    handoff(): void
+    workflows(): void
+    setView(mode: ViewMode): void
+    toggleSettings(): void
+    toggle(key: ToggleKey): void
+  },
+  checklist: ReturnType<typeof renderChecklist> = null,
 ) {
   const { Box, Text, Button } = el
   const isHandoffIdle = !flags.isWorking && !flags.isHandingOff
   const segs = segments(view)
 
   // Segments wrap onto further rows when the band is narrow; the buttons keep their place on the right.
-  return (
+  const bar = (
     <Box flexDirection="row" justifyContent="space-between">
       <Box flexDirection="row" flexWrap="wrap" flexGrow={1} flexShrink={1}>
         {view.settings.label && (
@@ -139,34 +157,60 @@ export function renderBar(
         ))}
       </Box>
       <Box flexDirection="row" gap={0} flexShrink={0}>
-        {view.settings.handoffButton && (
-          <Button
-            key="handoff"
-            label={flags.isHandingOff ? 'Handoff…' : 'Handoff'}
-            {...QUIET}
-            onPress={() => isHandoffIdle && on.handoff()}
-          />
-        )}
-        <Button key="settings" label="..." {...QUIET} onPress={() => on.openSettings()} />
+        {view.settings.handoffButton && <Button key="tools" label="🛠" {...QUIET} onPress={() => on.toggleTools()} />}
+        <Button key="settings" label="⁝" {...QUIET} onPress={() => on.toggleSettings()} />
       </Box>
     </Box>
   )
-}
 
-export function renderSettings(el: El, settings: Settings, on: { toggle(key: ToggleKey): void; close(): void }) {
-  const { Box, Text, Button } = el
-
-  return (
-    <Box flexDirection="column">
-      <Text bold>aicost settings</Text>
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {TOGGLES.map(t => (
-          <Button key={t.key} label={`[${settings[t.key] ? '✓' : ' '}] ${t.label}`} {...QUIET} onPress={() => on.toggle(t.key)} />
+  let menu = null
+  if (flags.isSettingsOpen) {
+    // At most SETTINGS_PER_ROW options to a row; a narrow band still wraps a row further.
+    const rows = Array.from({ length: Math.ceil(TOGGLES.length / SETTINGS_PER_ROW) }, (_, i) =>
+      TOGGLES.slice(i * SETTINGS_PER_ROW, (i + 1) * SETTINGS_PER_ROW),
+    )
+    menu = (
+      <Box flexDirection="column">
+        {rows.map((row, i) => (
+          <Box key={`settings-row-${i}`} flexDirection="row" flexWrap="wrap" justifyContent="flex-end" columnGap={2}>
+            {row.map(t => (
+              <Button key={t.key} label={`${view.settings[t.key] ? '●' : '○'} ${t.label}`} {...QUIET} onPress={() => on.toggle(t.key)} />
+            ))}
+          </Box>
         ))}
       </Box>
-      <Box flexDirection="row" justifyContent="flex-end">
-        <Button key="done" label="Done" {...QUIET} onPress={() => on.close()} />
+    )
+  } else if (flags.isToolsOpen && view.settings.handoffButton) {
+    menu = (
+      <Box flexDirection="row" justifyContent="flex-end" gap={0}>
+        <Button
+          key="handoff"
+          label={flags.isHandingOff ? 'Handoff…' : 'Handoff'}
+          {...QUIET}
+          onPress={() => isHandoffIdle && on.handoff()}
+        />
+        <Button key="workflows" label="Workflows" {...QUIET} onPress={() => on.workflows()} />
+        {VIEWS.map(v => (
+          <Button
+            key={v.mode}
+            label={`${flags.viewMode === v.mode ? '●' : '○'} ${v.label}`}
+            {...QUIET}
+            onPress={() => on.setView(flags.viewMode === v.mode ? 'off' : v.mode)}
+          />
+        ))}
       </Box>
+    )
+  }
+  if (!menu && !checklist) {
+    return bar
+  }
+
+  // An open menu (🛠 or ⁝) sits above the bar and the checklist below it, so the bar itself never shifts.
+  return (
+    <Box flexDirection="column" gap={1}>
+      {menu}
+      {bar}
+      {checklist}
     </Box>
   )
 }

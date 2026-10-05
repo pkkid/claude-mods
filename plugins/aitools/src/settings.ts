@@ -4,7 +4,7 @@ import type { Settings, ToggleKey } from '../types'
 export type KeyStore = { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<void> }
 
 export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
-  { key: 'label', label: 'AI Cost label' },
+  { key: 'label', label: 'AI Tools label' },
   { key: 'fiveHour', label: '5-hour usage' },
   { key: 'weekly', label: 'Weekly usage' },
   { key: 'resets', label: 'Reset countdowns' },
@@ -17,7 +17,7 @@ export const TOGGLES: readonly { key: ToggleKey; label: string }[] = [
   { key: 'burnRate', label: 'Burn-rate projection' },
   { key: 'thresholdColors', label: 'Threshold colors' },
   { key: 'thresholdAlerts', label: 'Threshold alerts' },
-  { key: 'handoffButton', label: 'Handoff button' },
+  { key: 'handoffButton', label: 'Tools menu' },
 ]
 
 export const DEFAULT_SETTINGS: Settings = Object.fromEntries(TOGGLES.map(t => [t.key, true])) as Settings
@@ -43,7 +43,7 @@ export async function saveSettings(store: KeyStore, settings: Settings): Promise
   await store.set('settings', settings)
 }
 
-/** Whether `/aicost <args>` hides the bar: no argument toggles, on/show and off/hide set it; null for anything else. */
+/** Whether `/aitools <args>` hides the bar: no argument toggles, on/show and off/hide set it; null for anything else. */
 export function nextHidden(args: string, isHidden: boolean): boolean | null {
   const word = args.trim().toLowerCase()
   if (word === '') {
