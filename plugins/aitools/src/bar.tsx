@@ -189,6 +189,18 @@ const SETTINGS_PER_ROW = 5
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
 const QUIET = { plain: true, dimColor: true } as const
 
+/**
+ * The two menu buttons' labels. The terminal gets words: it lays a bare 🛠 out one column wide but paints it two,
+ * which pushes ⁝ under the icon's right half and both presses onto the icon.
+ */
+const MENU_LABELS = {
+  desktop: { tools: '🛠', settings: '⁝' },
+  terminal: { tools: 'tools', settings: 'opts' },
+} as const
+
+/** Room between neighboring buttons: the desktop's native chrome parts them, the terminal's plain words need spaces. */
+const BUTTON_GAP = { desktop: 0, terminal: 2 } as const
+
 export function renderBar(
   el: El,
   view: View,
@@ -217,6 +229,8 @@ export function renderBar(
   const segs = segments(view)
 
   const art = Svg && view.settings.mascot ? flags.mascot : null
+  const labels = Svg ? MENU_LABELS.desktop : MENU_LABELS.terminal
+  const gap = Svg ? BUTTON_GAP.desktop : BUTTON_GAP.terminal
 
   // Segments wrap onto further rows when the band is narrow; the mascot and the buttons keep their places at the ends.
   // Beside the mascot the row centers on him; without him the buttons stay on the first row of text.
@@ -245,9 +259,9 @@ export function renderBar(
           </Box>
         ))}
       </Box>
-      <Box flexDirection="row" gap={0} flexShrink={0}>
-        <Button key="tools" label="🛠" {...QUIET} onPress={() => on.toggleTools()} />
-        <Button key="settings" label="⁝" {...QUIET} onPress={() => on.toggleSettings()} />
+      <Box flexDirection="row" gap={gap} flexShrink={0}>
+        <Button key="tools" label={labels.tools} {...QUIET} onPress={() => on.toggleTools()} />
+        <Button key="settings" label={labels.settings} {...QUIET} onPress={() => on.toggleSettings()} />
       </Box>
     </Box>
   )
@@ -276,7 +290,7 @@ export function renderBar(
     )
   } else if (flags.isToolsOpen) {
     menu = (
-      <Box flexDirection="row" justifyContent="flex-end" gap={0}>
+      <Box flexDirection="row" justifyContent="flex-end" gap={gap}>
         <Button
           key="handoff"
           label={flags.isHandingOff ? 'Handoff…' : 'Handoff'}

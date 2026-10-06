@@ -32,7 +32,9 @@ describe('AbovePrompt band', () => {
     mock.clock(on, { now: NOW })
     for (const surface of SURFACES) {
       const ui = await $.ui.mount(band(surface))
-      expect((await ui.find({ key: 'settings' }))?.text).toBe('⁝')
+      // The terminal names the menus in words: it paints a bare 🛠 wider than it lays it out.
+      expect((await ui.find({ key: 'tools' }))?.text).toBe(surface === 'terminal' ? 'tools' : '🛠')
+      expect((await ui.find({ key: 'settings' }))?.text).toBe(surface === 'terminal' ? 'opts' : '⁝')
       expect(await ui.find({ text: /wk/ })).toBeDefined()
 
       await ui.press({ key: 'settings' })

@@ -35,7 +35,8 @@ are a handy way to see which conversations are expensive.
 ### Two buttons: tools and display options
 
 **🛠** opens a row of tools above the bar. **⁝** opens the display options, where you can switch any part of the bar
-on or off; the choices are saved. Anything switched off also stops doing work in the background.
+on or off; the choices are saved. Anything switched off also stops doing work in the background. In the terminal the
+two buttons read `tools` and `opts`.
 
 ![The tools row and the display options](docs/images/menus.svg)
 
