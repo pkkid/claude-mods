@@ -11,16 +11,25 @@ The repo is a plugin marketplace, so every mod installs the same way.
 
 ## Install
 
-In a Claude Code session:
+In a Claude Code session, add this repo as a marketplace straight from GitHub, then install a mod from it:
+
+```
+/plugin marketplace add pkkid/claude-mods
+/plugin install aitools@claude-mods
+```
+
+To pick up later changes, run `/plugin marketplace update claude-mods`.
+
+## Develop
+
+To install from a local checkout instead of GitHub:
 
 ```
 /plugin marketplace add ~/Projects/claude-mods
 /plugin install aitools@claude-mods
 ```
 
-## Develop
-
-Load mods straight from this checkout, with hot reload, by adding to the `env` block of `~/.claude/settings.json`
+Or load mods straight from this checkout, with hot reload, by adding to the `env` block of `~/.claude/settings.json`
 (paths separated by `:`; restart Claude Desktop after changing it):
 
 ```json
