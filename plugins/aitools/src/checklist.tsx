@@ -174,6 +174,11 @@ export const BLUE = '#478487'
 const MARK_COLORS = { done: GREEN, doing: BLUE, todo: undefined } as const
 /** The step in progress: a grey between dim and full white, so it stands out without glaring. */
 export const DOING_TEXT = '#b0b0b0'
+/**
+ * The bar's dim grey, named: the desktop draws `dimColor` in a pane nearly as light as DOING_TEXT, so pane text that
+ * must read as faint as the bar's labels uses this instead.
+ */
+export const FAINT_TEXT = '#808080'
 
 /** The checklist under the bar: the steps while work goes on, one line once every step is done. */
 /** `onClose` clears the checklist: the × at the end of the folded Done line. */

@@ -198,16 +198,14 @@ export function renderBar(
     isToolsOpen: boolean
     isSettingsOpen: boolean
     viewMode: ViewMode
-    isDockOpen: boolean
     /** The mascot's drawing as it stands now. */
     mascot: { source: string; alt: string } | null
   },
   on: {
     toggleTools(): void
     handoff(): void
-    workflows(): void
     setView(mode: ViewMode): void
-    toggleDock(): void
+    openDock(): void
     toggleSettings(): void
     toggle(key: ToggleKey): void
   },
@@ -284,7 +282,7 @@ export function renderBar(
           {...QUIET}
           onPress={() => isHandoffIdle && on.handoff()}
         />
-        <Button key="workflows" label="Workflows" {...QUIET} onPress={() => on.workflows()} />
+        <Button key="subagents" label="Subagents" {...QUIET} onPress={() => on.openDock()} />
         {VIEWS.map(v => (
           <Button
             key={v.mode}
@@ -293,7 +291,6 @@ export function renderBar(
             onPress={() => on.setView(flags.viewMode === v.mode ? 'off' : v.mode)}
           />
         ))}
-        <Button key="agentdock" label={`${flags.isDockOpen ? '●' : '○'} Agent Dock`} {...QUIET} onPress={() => on.toggleDock()} />
       </Box>
     )
   }

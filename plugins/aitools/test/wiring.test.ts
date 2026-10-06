@@ -245,55 +245,6 @@ describe('wiring', () => {
     expect(copies).toEqual([brief])
   })
 
-  test("the tools menu's Workflows runs /workflows itself", async ($, on) => {
-    const fills: string[] = []
-    const commands: string[] = []
-    on('prompt.fill', (_, e) => {
-      fills.push(e.text)
-      return { isFilled: true, text: e.text }
-    })
-    on('command.run', (_, e) => {
-      commands.push(e.command)
-      return {}
-    })
-    on('command.list', () => ({ value: [{ name: 'workflows', description: 'Workflows', source: 'builtin' as const }] }))
-    await start($, on, { usd: 0 })
-    const ui = await $.ui.mount(band())
-    await ui.press({ key: 'tools' })
-    await ui.press({ key: 'workflows' })
-    expect(await ui.find({ key: 'workflows' })).toBeUndefined()
-    await ui.unmount()
-    expect(commands).toEqual(['workflows'])
-    expect(fills).toEqual([])
-  })
-
-  test("the tools menu's Workflows stages /workflows in the prompt box when the engine has no such command", async ($, on) => {
-    const commands: string[] = []
-    const fills: string[] = []
-    const toasts: string[] = []
-    on('prompt.fill', (_, e) => {
-      fills.push(e.text)
-      return { isFilled: true, text: e.text }
-    })
-    on('ui.toast', (_, e) => {
-      toasts.push(e.text)
-      return { value: undefined }
-    })
-    on('command.run', (_, e) => {
-      commands.push(e.command)
-      return {}
-    })
-    on('command.list', () => ({ value: [] }))
-    await start($, on, { usd: 0 })
-    const ui = await $.ui.mount(band())
-    await ui.press({ key: 'tools' })
-    await ui.press({ key: 'workflows' })
-    await ui.unmount()
-    expect(commands).toEqual([])
-    expect(fills).toEqual(['/workflows'])
-    expect(toasts).toEqual([])
-  })
-
   describe('Task View and Clean View', () => {
     const CHECKLIST = 'mcp__aitools__checklist'
     const PLAN = {
@@ -501,7 +452,7 @@ describe('wiring', () => {
     })
   })
 
-  describe('Agent Dock', () => {
+  describe('Subagents', () => {
     const run = (on$: Engine, command: string) =>
       on$.command.run({ command, args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
 
@@ -517,8 +468,26 @@ describe('wiring', () => {
 
     const DOCK = { plugin: 'aitools', surface: 'desktop' as const, component: 'Pane' as const, props: PANE }
 
+    /** The reads `pick` and `picks` make of a mounted pane. */
+    type Mounted = {
+      find(query: { key?: string; type?: string; text?: string }): Promise<{ type: string; props: Record<string, unknown>; text: string } | undefined>
+      findAll(query: object): Promise<{ key: string | undefined }[]>
+    }
+
+    /** A choice as the pane draws it, a plain button as the bar's: `[x] 5` picked (full strength), `[ ] 20` dim. */
+    async function pick(view: Mounted, key: string): Promise<string> {
+      const el = await view.find({ key })
+      const isPicked = el?.props.plain === true && el.props.dimColor === false
+      return `${isPicked ? '[x]' : '[ ]'} ${el?.text}`
+    }
+
+    /** The choices of one row, by key prefix, in order: picked or not. */
+    async function picks(view: Mounted, prefix: string): Promise<(string | undefined)[]> {
+      return (await view.findAll({})).map(e => e.key).filter(k => k?.startsWith(prefix))
+    }
+
     async function dockText($: Engine): Promise<string> {
-      const pane = await $.ui.mount({ ...DOCK, requestId: 'agentdock' })
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
       const text = (await pane.findAll({ type: 'Text' })).map(t => t.text).join('')
       await pane.unmount()
 
@@ -542,39 +511,89 @@ describe('wiring', () => {
       })
     }
 
-    test('/agentdock opens the dock pane; the team and helper picks show with a warning past 10', async ($, on) => {
-      const panes = await start($, on, { usd: 0 })
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 5 Same as chat helpers.')
-      expect(panes.open.has('agentdock')).toBe(true)
-      const ui = await $.ui.mount({ ...DOCK, requestId: 'agentdock' })
-      expect((await ui.find({ key: 'team-5' }))?.text).toBe('● 5')
-      expect((await ui.find({ key: 'helpers-same' }))?.text).toBe('● Same as chat')
-      const order = (await ui.findAll({ type: 'Button' })).map(b => b.key).filter(k => k?.startsWith('helpers-'))
+    test('/subagents opens the Subagents pane; the team and helper picks show with a warning past 10', async ($, on) => {
+      const panes = await start($, on, { usd: 0 }, { agentTeam: 5 })
+      expect((await run($, 'subagents')).text).toBe('Subagents open: 5 Same as chat helpers.')
+      expect(panes.open.has('subagents')).toBe(true)
+      const ui = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      expect(await pick(ui, 'team-5')).toBe('[x] 5')
+      expect(await pick(ui, 'helpers-same')).toBe('[x] Same as chat')
+      const order = await picks(ui, 'helpers-')
       expect(order).toEqual(['helpers-same', 'helpers-fast'])
       expect(await ui.find({ text: /uses your Claude usage much faster/ })).toBeUndefined()
       await ui.press({ key: 'team-20' })
       await ui.press({ key: 'helpers-fast' })
-      expect((await ui.find({ key: 'team-20' }))?.text).toBe('● 20')
-      expect((await ui.find({ key: 'helpers-fast' }))?.text).toBe('● Fast & cheap')
+      expect(await pick(ui, 'team-20')).toBe('[x] 20')
+      expect(await pick(ui, 'helpers-fast')).toBe('[x] Fast & cheap')
       expect(await ui.find({ text: '⚠ A team of 20 uses your Claude usage much faster.' })).toBeDefined()
       await ui.unmount()
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock closed.')
-      expect(panes.open.has('agentdock')).toBe(false)
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 20 Fast & cheap helpers.')
+      expect((await run($, 'subagents')).text).toBe('Subagents closed.')
+      expect(panes.open.has('subagents')).toBe(false)
+      expect((await run($, 'subagents')).text).toBe('Subagents open: 20 Fast & cheap helpers.')
     })
 
-    test('the 🛠 menu opens and closes the dock, marking it ● while open', async ($, on) => {
-      const panes = await start($, on, { usd: 0 })
+    test('the 🛠 menu\'s Subagents only opens the pane, with no circle', async ($, on) => {
+      const panes = await start($, on, { usd: 0 }, { agentTeam: 5 })
       const ui = await $.ui.mount(band())
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'agentdock' }))?.text).toBe('○ Agent Dock')
-      await ui.press({ key: 'agentdock' })
-      expect(panes.open.has('agentdock')).toBe(true)
+      expect((await ui.find({ key: 'subagents' }))?.text).toBe('Subagents')
+      await ui.press({ key: 'subagents' })
+      expect(panes.open.has('subagents')).toBe(true)
       await ui.press({ key: 'tools' })
-      expect((await ui.find({ key: 'agentdock' }))?.text).toBe('● Agent Dock')
-      await ui.press({ key: 'agentdock' })
+      expect((await ui.find({ key: 'subagents' }))?.text).toBe('Subagents')
+      await ui.press({ key: 'subagents' })
       await ui.unmount()
-      expect(panes.open.has('agentdock')).toBe(false)
+      expect(panes.open.has('subagents')).toBe(true)
+    })
+
+    test('Default, the first pick and a new setup\'s, changes nothing: no note, no helper changes, no status', async ($, on) => {
+      const seen: { model?: string; prompt: string }[] = []
+      const contexts: (readonly string[] | undefined)[] = []
+      const statuses: (string | undefined)[] = []
+      coreSpawn(on, seen)
+      on('prompt.submit', (_, e) => {
+        contexts.push(e.context)
+        return { text: e.text }
+      })
+      on('ui.status', (_, e) => {
+        statuses.push(e.text)
+        return { value: undefined }
+      })
+      await start($, on, { usd: 0 })
+      expect((await run($, 'subagents')).text).toBe('Subagents open: Default, subagents run as usual.')
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      expect(await picks(pane, 'team-')).toEqual(['team-default', 'team-3', 'team-5', 'team-10', 'team-20', 'team-30'])
+      expect(await pick(pane, 'team-default')).toBe('[x] Default')
+      // Set model shows on Default, faint and unpickable: text, not buttons.
+      expect((await pane.find({ type: 'Text', text: 'Same as chat' }))?.props.color).toBe('#808080')
+      expect(await pane.find({ type: 'Button', text: 'Same as chat' })).toBeUndefined()
+      expect(await pane.find({ text: /run as Claude Code normally runs them/ })).toBeUndefined()
+      await pane.unmount()
+      await $.prompt.submit({ text: 'Do it', wait: false, origin: { kind: 'composer' } })
+      const started = await spawn($, 'Piece', 'Do a piece')
+      expect(contexts).toEqual([undefined])
+      expect(started.model).toBe('parent')
+      expect(seen[0]?.prompt).toBe('Do a piece')
+      expect(statuses.filter(t => t?.includes('Subagents'))).toEqual([])
+      expect(registered).not.toContain('agent_progress')
+    })
+
+    test('picking a team size starts the pane\'s work; Default stops it', async ($, on) => {
+      const statuses: (string | undefined)[] = []
+      on('ui.status', (_, e) => {
+        statuses.push(e.text)
+        return { value: undefined }
+      })
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      await pane.press({ key: 'team-3' })
+      expect(statuses.at(-1)).toBe('Subagents')
+      expect(registered).toContain('agent_progress')
+      expect(await pane.find({ key: 'helpers-same' })).toBeDefined()
+      await pane.press({ key: 'team-default' })
+      expect(statuses.at(-1)).toBeUndefined()
+      await pane.unmount()
     })
 
     test('a dock whose pane is gone turns off: no note goes with the next prompt', async ($, on) => {
@@ -583,39 +602,40 @@ describe('wiring', () => {
         contexts.push(e.context)
         return { text: e.text }
       })
-      const panes = await start($, on, { usd: 0 })
-      await run($, 'agentdock')
-      panes.open.delete('agentdock')
+      const panes = await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
+      panes.open.delete('subagents')
       await $.prompt.submit({ text: 'after closing', wait: false, origin: { kind: 'composer' } })
       expect(contexts).toEqual([undefined])
-      expect((await run($, 'agentdock')).text).toContain('Agent Dock open')
+      expect((await run($, 'subagents')).text).toContain('Subagents open')
     })
 
-    test('the status line adds Agent Dock beside the view while the dock is open', async ($, on) => {
+    test('the status line adds Subagents beside the view while the dock is open', async ($, on) => {
       const statuses: (string | undefined)[] = []
       on('ui.status', (_, e) => {
         statuses.push(e.text)
         return { value: undefined }
       })
-      await start($, on, { usd: 0 }, { viewMode: 'task' })
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { viewMode: 'task', agentTeam: 5 })
+      await run($, 'subagents')
       await run($, 'taskview')
-      await run($, 'agentdock')
-      expect(statuses).toEqual(['Task View', 'Task View, Agent Dock', 'Agent Dock', undefined])
+      await run($, 'subagents')
+      expect(statuses).toEqual(['Task View', 'Task View, Subagents', 'Subagents', undefined])
     })
 
-    test('the dock labels read Team size: and Helpers:', async ($, on) => {
-      await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+    test('the pane\'s rows read Showing:, Hide completed:, Set team size: and Set model:, in that order', async ($, on) => {
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       const text = await dockText($)
-      expect(text).toContain('Team size:')
-      expect(text).toContain('Helpers:')
+      const order = ['Showing:', 'Hide completed:', 'Set team size:', 'Set model:'].map(label => text.indexOf(label))
+      expect(order.every(i => i >= 0)).toBe(true)
+      expect([...order].sort((a, b) => a - b)).toEqual(order)
     })
 
     test('saved team and helper picks come back, but the dock starts closed', async ($, on) => {
       const panes = await start($, on, { usd: 0 }, { agentTeam: 3, agentHelpers: 'same' })
       expect(panes.opened).toEqual([])
-      expect((await run($, 'agentdock')).text).toBe('Agent Dock open: 3 Same as chat helpers.')
+      expect((await run($, 'subagents')).text).toBe('Subagents open: 3 Same as chat helpers.')
     })
 
     test('the dock note goes with prompts only while the dock is open', async ($, on) => {
@@ -624,26 +644,28 @@ describe('wiring', () => {
         contexts.push(e.context)
         return { text: e.text }
       })
-      await start($, on, { usd: 0 })
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
       await $.prompt.submit({ text: 'before', wait: false, origin: { kind: 'composer' } })
-      await run($, 'agentdock')
+      await run($, 'subagents')
       await $.prompt.submit({ text: 'after', wait: false, origin: { kind: 'composer' } })
       expect(contexts[0]).toBeUndefined()
-      expect(contexts[1]?.[0]).toContain('Agent Dock is on')
+      expect(contexts[1]?.[0]).toContain('Subagents pane is open')
     })
 
     test('a helper runs Fast & cheap, reports progress on its card, and a full team queues the rest', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       const steps: Step[] = []
       coreSpawn(on, seen)
-      await start($, on, { usd: 0 }, { agentTeam: 1, agentHelpers: 'fast' }, [], steps)
+      await start($, on, { usd: 0 }, { agentTeam: 3, agentHelpers: 'fast' }, [], steps)
       expect((await spawn($, 'Ignored', 'outside')).model).toBe('parent')
-      await run($, 'agentdock')
+      await run($, 'subagents')
       const first = await spawn($, 'Licenses', 'Research licenses')
       expect(first.agentId).toBe('agent-2')
       expect(seen[1]?.model).toBe('claude-sonnet-5-5')
       expect(seen[1]?.prompt).toContain('mcp__aitools__agent_progress')
-      expect((await spawn($, 'Floor plan', 'Plan')).deny).toContain('all 1 helpers are busy')
+      await spawn($, 'Budget', 'Draft a budget')
+      await spawn($, 'Zoning', 'Check zoning')
+      expect((await spawn($, 'Floor plan', 'Plan')).deny).toContain('all 3 helpers are busy')
 
       const progress = { doing: 'Reading the city site', percent: 40 }
       await $.tool.call({ tool: 'mcp__aitools__agent_progress', agentId: 'agent-2', ...progress })
@@ -653,54 +675,162 @@ describe('wiring', () => {
       }
       expect(steps.at(-1)).toEqual({ agentId: 'agent-2', model: 'claude-sonnet-5-5', effort: 'low' })
       const text = await dockText($)
-      const dock = await $.ui.mount({ ...DOCK, requestId: 'agentdock' })
+      const dock = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
       const task = (await dock.findAll({ type: 'Text' })).find(t => t.text.startsWith('Licenses'))
       await dock.unmount()
       expect([task?.props.color, task?.props.bold ?? false]).toEqual(['#b0b0b0', false])
-      expect(text).toContain('1 agent · 1 working · 1 queued')
+      expect(text).toContain('3 agents · 3 working · 1 queued')
       expect(text).toContain('Licenses · Reading the city site')
       expect(text).toContain(' 40% ▰▰▰▰▱▱▱▱▱▱')
     })
 
-    test("a helper's report arriving as a prompt keeps the run; the person's next prompt clears it", async ($, on) => {
+    test("a helper's report arriving as a prompt keeps the run; so does the person's next prompt", async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       on('prompt.submit', (_, e) => ({ text: e.text }))
-      await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       await spawn($, 'Licenses', 'a')
       await $.turn.complete({ ...complete('h1', 'agent-1'), answer: 'Found three licenses.' })
       await $.prompt.submit({ text: 'report', wait: false, origin: { kind: 'task-notification' } as never })
       await $.turn.complete({ ...complete('t2'), answer: 'Here is the plan.' })
       const text = await dockText($)
       expect(text).toContain('✓ Licenses')
-      expect(text).toContain('The helper finished in 0 seconds.')
+      expect(text).toContain('✓ Licenses 0:00 (just now)')
       await $.prompt.submit({ text: 'next job', wait: false, origin: { kind: 'composer' } })
-      expect(await dockText($)).toContain('Your next prompt can hand work to 5')
+      expect(await dockText($)).toContain('✓ Licenses')
     })
 
     test('a helper the engine lists as finished is settled even if its finish was missed', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       on('agent.list', () => ({ value: [{ id: 'agent-1', description: 'Licenses', type: 'general-purpose', status: 'completed' }] }))
-      await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       await spawn($, 'Licenses', 'a')
       await $.turn.complete({ ...complete('t2'), answer: 'All done.' })
-      expect(await dockText($)).toContain('The helper finished in 0 seconds.')
+      expect(await dockText($)).toContain('✓ Licenses 0:00 (just now)')
     })
 
     test('helpers started together respect the team size and keep every card', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       await start($, on, { usd: 0 }, { agentTeam: 3 })
-      await run($, 'agentdock')
+      await run($, 'subagents')
       const results = await Promise.all(['A', 'B', 'C', 'D', 'E'].map(name => spawn($, name)))
       expect(results.filter(r => r.agentId !== undefined)).toHaveLength(3)
       expect(results.filter(r => r.deny !== undefined)).toHaveLength(2)
       const text = await dockText($)
       expect(text).toContain('3 agents · 3 working · 2 queued')
       expect(text.match(/● /g)).toHaveLength(3)
+      // Queued pieces wait above the running ones.
+      expect(text).toContain('○ Dqueued')
+      expect(text.indexOf('○ D')).toBeLessThan(text.indexOf('● A'))
+    })
+
+    test('on Default every subagent gets a line: its latest tool call, then ✓ below the running ones once done', async ($, on) => {
+      const seen: { model?: string; prompt: string }[] = []
+      coreSpawn(on, seen)
+      on('tool.call', { tool: 'Read' }, () => ({ result: 'file text' }))
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await spawn($, 'Survey the code', 'look around')
+      await spawn($, 'Write tests', 'add tests')
+      await $.tool.call({ tool: 'Read', file_path: '/repo/src/bar.tsx', agentId: 'agent-1' } as never)
+      let text = await dockText($)
+      expect(text).toContain('2 working')
+      expect(text).toContain('● Survey the code · Reading bar.tsx')
+      expect(text).not.toContain('%')
+      await $.turn.complete({ ...complete('s1', 'agent-1'), answer: 'Surveyed.' })
+      text = await dockText($)
+      expect(text.indexOf('● Write tests')).toBeLessThan(text.indexOf('✓ Survey the code'))
+      // Default adds nothing to what the subagent is asked.
+      expect(seen.map(s => s.prompt)).toEqual(['look around', 'add tests'])
+    })
+
+    test('a running name is half-dim and its activity faint; a finished line is all faint with how long ago', async ($, on) => {
+      coreSpawn(on, [])
+      on('tool.call', { tool: 'Read' }, () => ({ result: 'file text' }))
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await spawn($, 'Survey the code', 'look around')
+      await spawn($, 'Write tests', 'add tests')
+      await $.tool.call({ tool: 'Read', file_path: '/repo/src/bar.tsx', agentId: 'agent-1' } as never)
+      await $.turn.complete({ ...complete('s2', 'agent-2'), answer: 'Written.' })
+      await clock.advance(3 * 60_000)
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      const texts = await pane.findAll({ type: 'Text' })
+      await pane.unmount()
+      const find = (text: string) => texts.find(t => t.text === text)
+      expect(find('Survey the code')?.props.color).toBe('#b0b0b0')
+      expect(find(' · Reading bar.tsx')?.props.color).toBe('#808080')
+      expect(find('✓ ')?.props.color).toBe('#808080')
+      expect(find('Write tests')?.props.color).toBe('#808080')
+      expect(find(' 0:00 (3m ago)')?.props.color).toBe('#808080')
+      expect(find(' 0:00 (3m ago)')).toBeDefined()
+    })
+
+    test('Showing and Hide completed: their own rows, applied to the lines', async ($, on) => {
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      coreSpawn(on, [])
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await spawn($, 'Earlier job')
+      await $.turn.complete({ ...complete('s1', 'agent-1'), answer: 'Done.' })
+      await clock.advance(2 * 60_000)
+      await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+      await spawn($, 'Current job')
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      expect(await picks(pane, 'showing-')).toEqual(['showing-all', 'showing-tool', 'showing-current'])
+      expect(await picks(pane, 'hide-')).toEqual(['hide-never', 'hide-15', 'hide-5', 'hide-1', 'hide-0'])
+      expect(await pick(pane, 'showing-all')).toBe('[x] All')
+      expect(await pick(pane, 'hide-never')).toBe('[x] Never')
+      expect(await pick(pane, 'hide-0')).toBe('[ ] Immediate')
+      expect(await pane.find({ text: 'Earlier job' })).toBeDefined()
+      await pane.press({ key: 'showing-current' })
+      expect(await pane.find({ text: 'Earlier job' })).toBeUndefined()
+      expect(await pane.find({ text: 'Current job' })).toBeDefined()
+      await pane.press({ key: 'showing-all' })
+      await pane.press({ key: 'hide-1' })
+      expect(await pane.find({ text: 'Earlier job' })).toBeUndefined()
+      await pane.unmount()
+    })
+
+    test('saved Showing and Hide completed picks come back', async ($, on) => {
+      await start($, on, { usd: 0 }, { agentShowing: 'tool', agentHideAfter: 0 })
+      await run($, 'subagents')
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      expect(await pick(pane, 'showing-tool')).toBe('[x] Tool agents')
+      expect(await pick(pane, 'hide-0')).toBe('[x] Immediate')
+      await pane.unmount()
+    })
+
+    test('with the pane closed, subagents get no lines', async ($, on) => {
+      coreSpawn(on, [])
+      await start($, on, { usd: 0 })
+      await spawn($, 'Unwatched')
+      await run($, 'subagents')
+      expect(await dockText($)).not.toContain('Unwatched')
+    })
+
+    test("a workflow's agents get lines under its name; an unlisted loop with no workflow started gets none", async ($, on) => {
+      on('tool.call', { tool: 'Workflow' }, () => ({ result: 'Workflow started' }))
+      on('agent.list', () => ({ value: [] }))
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await step($, 'fork-1')
+      expect(await dockText($)).not.toContain('agent 1')
+      const script = "export const meta = { name: 'review-changes', description: 'Review' }"
+      await $.tool.call({ tool: 'Workflow', script } as never)
+      await step($, 'wf-a')
+      await step($, 'wf-b')
+      let text = await dockText($)
+      expect(text).toContain('● review-changes · agent 1')
+      expect(text).toContain('● review-changes · agent 2')
+      await $.turn.complete({ ...complete('w1', 'wf-a'), reason: 'error' })
+      text = await dockText($)
+      expect(text).toContain('× review-changes · agent 1')
+      expect(text.indexOf('● review-changes · agent 2')).toBeLessThan(text.indexOf('× review-changes · agent 1'))
     })
 
     test("a helper's first request waits for its start, so it runs Fast & cheap", async ($, on) => {
@@ -714,8 +844,8 @@ describe('wiring', () => {
         await gate
         return { model: e.model ?? 'parent', agentId: 'agent-1' }
       })
-      await start($, on, { usd: 0 }, { agentHelpers: 'fast' }, [], steps)
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { agentTeam: 5, agentHelpers: 'fast' }, [], steps)
+      await run($, 'subagents')
       // The helper's first request goes out while its start is still being recorded.
       const spawning = spawn($, 'Licenses')
       await reachedEngine
@@ -734,26 +864,26 @@ describe('wiring', () => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       on('agent.list', () => ({ value: [] }))
-      await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       await spawn($, 'Licenses', 'a')
       await $.turn.complete({ ...complete('t2'), answer: 'All done.' })
-      expect(await dockText($)).toContain('The helper finished in 0 seconds.')
+      expect(await dockText($)).toContain('✓ Licenses 0:00 (just now)')
     })
 
-    test("the person's prompt clears the last job even while the dock is closed", async ($, on) => {
+    test('finished lines stay across prompts, the pane closed and opened again', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       on('prompt.submit', (_, e) => ({ text: e.text }))
-      await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       await spawn($, 'Licenses', 'a')
       await $.turn.complete({ ...complete('h1', 'agent-1'), answer: 'Done.' })
       await $.turn.complete({ ...complete('t2'), answer: 'All done.' })
-      await run($, 'agentdock')
+      await run($, 'subagents')
       await $.prompt.submit({ text: 'something else', wait: false, origin: { kind: 'composer' } })
-      await run($, 'agentdock')
-      expect(await dockText($)).toContain('Your next prompt can hand work to 5')
+      await run($, 'subagents')
+      expect(await dockText($)).toContain('✓ Licenses')
     })
 
     test('a dock pane that is open but not on screen applies nothing and says so', async ($, on) => {
@@ -767,44 +897,50 @@ describe('wiring', () => {
         contexts.push(e.context)
         return { text: e.text }
       })
-      const panes = await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      const panes = await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       panes.isPlaced = false
       await $.prompt.submit({ text: 'go', wait: false, origin: { kind: 'composer' } })
       expect(contexts).toEqual([undefined])
-      expect(statuses.at(-1)).toBe('Agent Dock (not shown)')
+      expect(statuses.at(-1)).toBe('Subagents (not shown)')
     })
 
     test('a helper outside the dock reports nothing; the main chat cannot report progress', async ($, on) => {
-      await start($, on, { usd: 0 })
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
       const denied = await $.tool.call({ tool: 'mcp__aitools__agent_progress', doing: 'x', percent: 5 })
-      expect(denied.deny).toBe('Only Agent Dock helpers report progress.')
+      expect(denied.deny).toBe('Only Subagents helpers report progress.')
     })
 
     test('when every helper is done and Claude replies, the dock adds a finish line under the cards', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       coreSpawn(on, seen)
       on('prompt.submit', (_, e) => ({ text: e.text }))
-      const { opened } = await start($, on, { usd: 0 })
-      await run($, 'agentdock')
+      const { opened } = await start($, on, { usd: 0 }, { agentTeam: 5 })
+      await run($, 'subagents')
       await spawn($, 'Licenses', 'a')
       await spawn($, 'Floor plan', 'b')
       await $.turn.complete({ ...complete('t1'), answer: 'Still working.' })
-      expect(opened).toEqual(['agentdock'])
+      expect(opened).toEqual(['subagents'])
       expect(await dockText($)).toContain('5 agents · 2 working · 3 idle')
       await $.turn.complete({ ...complete('h1', 'agent-1'), answer: 'Found three licenses.' })
       await $.turn.complete({ ...complete('h2', 'agent-2'), reason: 'error', answer: '' })
       await $.turn.complete({ ...complete('t2'), answer: 'Here is the plan.' })
       await $.turn.complete({ ...complete('t3'), answer: 'Anything else?' })
-      expect(opened).toEqual(['agentdock'])
+      expect(opened).toEqual(['subagents'])
       const text = await dockText($)
       expect(text).toContain('✓ Licenses')
-      expect(text).toContain('✕ Floor plan')
-      expect(text).toContain('1 of 2 helpers finished and 1 failed, in 0 seconds each.')
+      expect(text).toContain('× Floor plan')
+      expect(text).toContain('× Floor plan 0:00 (just now)')
+      expect(text).not.toContain('%')
       expect(text).not.toContain('Found three licenses.')
       expect(text).not.toContain('Here is the plan.')
       await $.prompt.submit({ text: 'next job', wait: false, origin: { kind: 'composer' } })
-      expect(await dockText($)).toContain('Your next prompt can hand work to 5')
+      await spawn($, 'Budget', 'c')
+      const after = await dockText($)
+      // The earlier lines stay below the new one; the finish line waits for it.
+      expect(after.indexOf('● Budget')).toBeLessThan(after.indexOf('✓ Licenses'))
+      expect(after).toContain('× Floor plan')
+      expect(after).not.toContain('subagents finished')
     })
   })
 
@@ -1049,11 +1185,11 @@ describe('wiring', () => {
     })
 
     test('the checklist and progress tools are offered only once their view or the dock is on', async ($, on) => {
-      await start($, on, { usd: 0 })
+      await start($, on, { usd: 0 }, { agentTeam: 5 })
       expect(registered).toEqual([])
       await command($, 'taskview', 'on')
       expect(registered).toEqual(['checklist'])
-      await command($, 'agentdock')
+      await command($, 'subagents')
       expect(registered).toEqual(['checklist', 'agent_progress'])
     })
 

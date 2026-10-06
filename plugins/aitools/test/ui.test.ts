@@ -144,14 +144,14 @@ describe('AbovePrompt band', () => {
     mock.clock(on, { now: NOW })
     const ui = await $.ui.mount(band('desktop'))
     await ui.press({ key: 'tools' })
-    expect(await ui.find({ key: 'workflows' })).toBeDefined()
+    expect(await ui.find({ key: 'handoff' })).toBeDefined()
 
     await ui.press({ key: 'settings' })
     expect(await ui.find({ key: 'weekly' })).toBeDefined()
-    expect(await ui.find({ key: 'workflows' })).toBeUndefined()
+    expect(await ui.find({ key: 'handoff' })).toBeUndefined()
 
     await ui.press({ key: 'tools' })
-    expect(await ui.find({ key: 'workflows' })).toBeDefined()
+    expect(await ui.find({ key: 'handoff' })).toBeDefined()
     expect(await ui.find({ key: 'weekly' })).toBeUndefined()
     await ui.unmount()
   })

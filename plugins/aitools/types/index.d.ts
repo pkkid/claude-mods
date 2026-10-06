@@ -46,16 +46,36 @@ export type ChecklistItem = { text: string; status: 'todo' | 'doing' | 'done'; p
 /** The plan the model last reported through the checklist tool. */
 export type Checklist = { title: string; items: ChecklistItem[] }
 
-/** How many helper agents the Agent Dock lets run at once. */
-export type TeamSize = 1 | 3 | 5 | 10 | 20 | 30
+/** How many helper agents the Subagents pane lets run at once. */
+export type TeamSize = 3 | 5 | 10 | 20 | 30
+
+/** The team picked in the Subagents pane: a size, or Default, which leaves subagents as Claude Code runs them. */
+export type TeamPick = TeamSize | 'default'
 
 /** Fast & Cheap helpers run on a smaller, quicker setup; Same as chat on the chat's model and effort. */
 export type HelperMode = 'fast' | 'same'
 
-/** One helper agent's card in the dock. */
+/**
+ * Which subagents the pane lists: all of them, only those Claude started with its Agent tool (no workflow agents), or
+ * only those started since the person's last prompt.
+ */
+export type AgentShowing = 'all' | 'tool' | 'current'
+
+/** How long a finished subagent's line stays, in minutes: 0 hides it as soon as it finishes, `never` keeps it. */
+export type HideAfter = 0 | 1 | 5 | 15 | 'never'
+
+/**
+ * Who a subagent line is for: a helper the team started (it reports its own progress), any other subagent, or one of
+ * a workflow's agents (no name of its own: its workflow's, numbered).
+ */
+export type AgentKind = 'helper' | 'subagent' | 'workflow'
+
+/** One subagent's line in the Subagents pane. */
 export type AgentCard = {
   id: string
   task: string
+  /** Absent on lines from before kinds existed: those were all helpers. */
+  kind?: AgentKind
   doing?: string
   percent?: number
   status: 'running' | 'done' | 'failed'
@@ -63,8 +83,8 @@ export type AgentCard = {
   endedAt?: number
 }
 
-/** The helpers started for the current request, and pieces waiting for a free one. */
-export type AgentRun = { startedAt: number; cards: AgentCard[]; queued: string[]; isReported?: boolean }
+/** The subagents seen since the person's last request, and pieces waiting for a free helper. */
+export type AgentRun = { startedAt: number; cards: AgentCard[]; queued: string[] }
 
 /** What the mascot is doing; Celebrating, Oops and Waving play for a moment and give way. */
 export type MascotPose = 'idle' | 'working' | 'reading' | 'puzzled' | 'sleeping' | 'celebrate' | 'error' | 'wave'
@@ -117,11 +137,16 @@ declare module 'claude-code' {
       checklist: Checklist | null
       /** Final replies of finished turns: the only assistant text Clean View shows. */
       finals: string[]
-      /** Whether the Agent Dock is open; closed, none of its settings apply. Not kept across sessions. */
+      /** Whether the Subagents pane is open; closed, none of its settings apply. Not kept across sessions. */
       isDockOpen: boolean
       /** The dock's team size and helper model; mirrored in $.store. */
-      team: TeamSize
+      team: TeamPick
       helpers: HelperMode
+      /** The pane's Showing and Hide completed picks; mirrored in $.store. */
+      agentShowing: AgentShowing
+      hideAfter: HideAfter
+      /** When the person last sent a prompt while the pane was open: where Current task agents start. */
+      requestAt: number | null
       /** The helpers of the current request; reset when the person sends a new one. */
       agentRun: AgentRun | null
       /** The chat's reasoning effort, as its last request sent it: what Same as chat helpers use. */

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { clockTime, duration, tokens, usd, weeklyReset } from '../src/format'
+import { ago, clockTime, duration, tokens, usd, weeklyReset } from '../src/format'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -43,4 +43,14 @@ describe('weeklyReset', () => {
 describe('clockTime', () => {
   test('afternoon', () => expect(clockTime(new Date(2026, 9, 4, 15, 40).getTime())).toBe('3:40pm'))
   test('just after midnight', () => expect(clockTime(new Date(2026, 9, 4, 0, 5).getTime())).toBe('12:05am'))
+})
+
+describe('ago', () => {
+  test('one unit, whole numbers: just now, minutes, hours, days', () => {
+    expect(ago(30_000)).toBe('just now')
+    expect(ago(3 * 60_000 + 50_000)).toBe('3m ago')
+    expect(ago(63 * 60_000)).toBe('1h ago')
+    expect(ago(50 * 60 * 60_000)).toBe('2d ago')
+    expect(ago(-5)).toBe('just now')
+  })
 })

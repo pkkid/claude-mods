@@ -51,6 +51,16 @@ export function clockTime(ms: number): string {
 }
 
 /** Minutes and seconds, `1:05`, or hours too once past an hour; a clock-style running time. */
+/** How long ago, in its largest unit alone: `just now`, `3m ago`, `1h ago`, `2d ago`. */
+export function ago(ms: number): string {
+  const m = Math.floor(Math.max(0, ms) / 60_000)
+  if (m < 1) {
+    return 'just now'
+  }
+
+  return m < 60 ? `${m}m ago` : m < 24 * 60 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / (24 * 60))}d ago`
+}
+
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const [h, m, sec] = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
