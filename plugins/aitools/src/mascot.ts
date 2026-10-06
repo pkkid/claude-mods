@@ -24,8 +24,8 @@ const CX = 2
 export const MASCOT_WIDTH = W * 2
 export const MASCOT_HEIGHT = H * 2
 
-const O = '#D77757' // Claude orange
-const D = '#141413' // eyes
+export const O = '#D77757' // Claude orange
+export const D = '#141413' // eyes
 const BEZEL = '#3B3B39'
 const DECK = '#9A9893'
 const DECK_EDGE = '#5C5C58'
@@ -34,7 +34,7 @@ const PAGE = '#F6F0E4'
 const PAGE_EDGE = '#CFC4AF'
 const INK = '#B3A68E'
 const INK_DARK = '#6E6352'
-const ZZZ = '#8E96B8'
+export const ZZZ = '#8E96B8'
 const SPARK = '#F2C14E'
 const RED = '#E0524C'
 const SWEAT = '#7CC4E8'
@@ -48,7 +48,7 @@ type Arms = 'side' | 'typeA' | 'typeB' | 'scratchA' | 'scratchB' | 'up' | 'rest'
  */
 type Posture = { y?: number; x?: number; legs?: boolean | 'A' | 'B'; eyes: Eyes; look?: number; lookY?: number; arms: Arms }
 
-const rect = (x: number, y: number, w: number, h: number, c: string, extra = '') =>
+export const rect = (x: number, y: number, w: number, h: number, c: string, extra = '') =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}"${extra}/>`
 const dots = (pts: [number, number][], c: string) => pts.map(([x, y]) => rect(x, y, 1, 1, c)).join('')
 
@@ -99,7 +99,7 @@ function eyes(p: Posture, ey: number): string {
 }
 
 /** Clawd in one posture: body 10 x 5, arms on the middle row, eyes 1 x 2, four legs 2 tall. */
-function figure(p: Posture): string {
+export function figure(p: Posture): string {
   const y = p.y ?? 0
   let s = rect(7, 5 + y, 10, 5, O)
   if (p.legs !== false) {
@@ -185,7 +185,7 @@ function question(t: number): string {
 
 const Z: [number, number][] = [[0, 0], [1, 0], [2, 0], [3, 0], [2, 1], [1, 2], [0, 3], [1, 3], [2, 3], [3, 3]]
 
-function zzz(t: number): string {
+export function zzz(t: number): string {
   return centered([0, 1, 2]
     .map(i => {
       const begin = ms(t + i * 900)
@@ -233,8 +233,8 @@ type Pose = {
   propMove?: 'slide' | 'fade'
 }
 
-const standing = (p: Partial<Posture> = {}): Posture => ({ eyes: 'open', arms: 'side', ...p })
-const sitting = (p: Partial<Posture> = {}): Posture => ({ y: 2, legs: false, eyes: 'closed', arms: 'rest', ...p })
+export const standing = (p: Partial<Posture> = {}): Posture => ({ eyes: 'open', arms: 'side', ...p })
+export const sitting = (p: Partial<Posture> = {}): Posture => ({ y: 2, legs: false, eyes: 'closed', arms: 'rest', ...p })
 
 const repeat = (frames: Frames, n: number): Frames => Array.from({ length: n }, () => frames).flat()
 

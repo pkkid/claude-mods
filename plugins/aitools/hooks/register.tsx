@@ -8,6 +8,7 @@ import {
   HELPER_NOTE,
   PROGRESS_SPEC,
   PROGRESS_TOOL_ID,
+  SUBAGENT_NOTE,
   DEFAULT_HIDE_AFTER,
   DOCK_PANE,
   activityText,
@@ -416,10 +417,20 @@ async function viewCommand($: EngineInterface, view: 'task' | 'clean', args: str
   return { text: mode === 'off' ? `${name} off.` : `${VIEW_NAMES[mode]} on.` }
 }
 
-/** Redraws the dock's helper times, only while a helper runs. */
+/** Redraws the dock's running times each second; with nothing running any more, the timer stops. */
 async function bumpDockTick($: EngineInterface): Promise<void> {
   if (isRunning(await read($, agentRun))) {
     await update($, dockTick, n => n + 1)
+  } else {
+    dockTimer?.cancel()
+    dockTimer = null
+  }
+}
+
+/** Starts the once-a-second redraw while the pane is open and a subagent runs; it stops itself once none does. */
+async function startDockTimer($: EngineInterface): Promise<void> {
+  if (dockTimer === null && (await read($, isDockOpen)) && isRunning(await read($, agentRun))) {
+    dockTimer = $.clock.every(1000, () => void bumpDockTick($))
   }
 }
 
@@ -441,8 +452,8 @@ async function isTeamPicked($: EngineInterface): Promise<boolean> {
 }
 
 /**
- * Runs the pane's work only while it is open: its once-a-second redraw timer for running subagents' times, and, with a
- * team picked, the progress tool its helpers report through.
+ * Runs the pane's work only while it is open: its once-a-second redraw timer while a subagent runs, and the progress
+ * tool its subagents report through.
  */
 async function syncDock($: EngineInterface): Promise<void> {
   if (!(await read($, isDockOpen))) {
@@ -450,11 +461,8 @@ async function syncDock($: EngineInterface): Promise<void> {
     dockTimer = null
     return
   }
-  // Times tick each second, but only redraw while a subagent runs.
-  dockTimer ??= $.clock.every(1000, () => void bumpDockTick($))
-  if (await isTeamPicked($)) {
-    await registerTool($, PROGRESS_SPEC)
-  }
+  await startDockTimer($)
+  await registerTool($, PROGRESS_SPEC)
 }
 
 /**
@@ -557,6 +565,7 @@ async function trackAgent($: EngineInterface, id: string, task: string, kind: Ag
   }
   const now = await $.clock.now()
   await update($, agentRun, r => addCard(r ?? newRun(now), id, task, now, kind))
+  await startDockTimer($)
 }
 
 /**
@@ -601,8 +610,9 @@ async function settleCards($: EngineInterface): Promise<void> {
 
 
 /**
- * Starts a subagent the team does not run: as Claude Code would, given a line in the pane while it is open. Its start
- * counts as in flight, so its first request finds the line rather than racing it.
+ * Starts a subagent the team does not run: as Claude Code would, given a line in the pane while it is open and asked
+ * to report its progress there. Its start counts as in flight, so its first request finds the line rather than racing
+ * it.
  */
 async function startSubagent(
   $: EngineInterface,
@@ -617,7 +627,7 @@ async function startSubagent(
   const inFlight = new Promise<void>(resolve => (settle = resolve))
   startsInFlight.add(inFlight)
   try {
-    const started = await next(e)
+    const started = await next({ ...e, prompt: e.prompt + SUBAGENT_NOTE })
     if (started.agentId !== undefined) {
       await trackAgent($, started.agentId, e.description, 'subagent')
     }
@@ -1040,7 +1050,7 @@ export const register: Register = on => {
 
   // With a team picked, a helper the main chat starts runs on the team's model, reports progress, and waits its turn
   // when the team is full (refused with a note: a hook may not hold the start for long). Any other subagent started
-  // while the pane is open gets a line too, following its tool calls.
+  // while the pane is open gets a line too, following its tool calls and the progress it reports.
   on('agent.spawn', async ($, e, next) => {
     if (e.fork) {
       return next(e)
@@ -1070,6 +1080,7 @@ export const register: Register = on => {
         liveHelpers.add(id)
         seenAgents.add(id)
         await update($, agentRun, r => addCard(r ?? newRun(now), id, e.description, now, 'helper'))
+        await startDockTimer($)
       }
 
       return started
@@ -1090,11 +1101,11 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A helper's own report: answered here, so it never asks for permission.
+  // A subagent's own report: answered here, so it never asks for permission.
   on('tool.call', { tool: PROGRESS_TOOL_ID }, async ($, e) => {
     const id = e.agentId
     if (id === undefined) {
-      return { deny: 'Only Subagents helpers report progress.' }
+      return { deny: 'Only subagents report progress.' }
     }
     const doing = typeof e.doing === 'string' ? e.doing : ''
     const percent = typeof e.percent === 'number' ? e.percent : 0
@@ -1129,7 +1140,11 @@ export const register: Register = on => {
       now: await $.clock.now(),
     }
 
-    return renderDock($.ui.resolve(e), state, {
+    const el = $.ui.resolve(e)
+    // The totem is SVG: the terminal never gets it, whatever its table holds.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+
+    return renderDock({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, state, {
       setTeam: size => void setTeam($, size),
       setHelpers: mode => void setHelpers($, mode),
       setShowing: showing => void setShowing($, showing),
@@ -1152,10 +1167,11 @@ export const register: Register = on => {
   // The mascot follows the main chat's tools: reading while a read-only tool runs, puzzled while an AskUserQuestion
   // dialog waits (its `next` resolves once answered), startled when a call fails or is refused.
   //
-  // A subagent with a line in the Subagents pane shows its latest tool call there: `Reading bar.tsx`, `Running npm test`.
+  // A subagent with a line in the Subagents pane shows its latest tool call there, while the pane is open:
+  // `Reading bar.tsx`, `Running npm test`.
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined) {
-      if (trackedAgents.has(e.agentId)) {
+      if (trackedAgents.has(e.agentId) && (await read($, isDockOpen))) {
         const id = e.agentId
         const doing = activityText(e.tool, e as unknown as Record<string, unknown>)
         await update($, agentRun, run => (run === null ? run : noteActivity(run, id, doing)))

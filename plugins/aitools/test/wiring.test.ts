@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
+import { SUBAGENT_NOTE } from '../src/agentdock'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
@@ -367,9 +368,9 @@ describe('wiring', () => {
       const text = await barText($)
       expect(text).toContain('Dark mode')
       expect(text).toContain('1 of 3')
-      expect(text).toContain('● Add the tokens 40% ▰▰▰▰▱▱▱▱▱▱')
-      expect(text).toContain('○ Run the checks  0% ▱▱▱▱▱▱▱▱▱▱')
-      expect(text).toContain('✓ Read the theme100% ▰▰▰▰▰▰▰▰▰▰')
+      expect(text).toContain('● Add the tokens 40% ▰▰▱▱▱▱')
+      expect(text).toContain('○ Run the checks  0% ▱▱▱▱▱▱')
+      expect(text).toContain('✓ Read the theme100% ▰▰▰▰▰▰')
     })
 
     test('the checklist sits below the bar with green, blue and dim marks', async ($, on) => {
@@ -391,8 +392,8 @@ describe('wiring', () => {
       expect([doing?.props.color, doing?.props.bold ?? false, doing?.props.dimColor ?? false]).toEqual(['#b0b0b0', false, false])
       const fills = texts.filter(t => /^▰+$/.test(t.text))
       expect(fills.map(f => [f.text, f.props.color ?? null])).toEqual([
-        ['▰▰▰▰▰▰▰▰▰▰', '#6fbe49'],
-        ['▰▰▰▰', '#478487'],
+        ['▰▰▰▰▰▰', '#6fbe49'],
+        ['▰▰', '#478487'],
       ])
     })
 
@@ -546,7 +547,7 @@ describe('wiring', () => {
       expect(panes.open.has('subagents')).toBe(true)
     })
 
-    test('Default, the first pick and a new setup\'s, changes nothing: no note, no helper changes, no status', async ($, on) => {
+    test('Default, the first pick and a new setup\'s, adds no team: no note, no helper changes, no status', async ($, on) => {
       const seen: { model?: string; prompt: string }[] = []
       const contexts: (readonly string[] | undefined)[] = []
       const statuses: (string | undefined)[] = []
@@ -573,9 +574,10 @@ describe('wiring', () => {
       const started = await spawn($, 'Piece', 'Do a piece')
       expect(contexts).toEqual([undefined])
       expect(started.model).toBe('parent')
-      expect(seen[0]?.prompt).toBe('Do a piece')
+      // The subagent is only asked to report its progress to the pane.
+      expect(seen[0]?.prompt).toBe(`Do a piece${SUBAGENT_NOTE}`)
       expect(statuses.filter(t => t?.includes('Subagents'))).toEqual([])
-      expect(registered).not.toContain('agent_progress')
+      expect(registered).toContain('agent_progress')
     })
 
     test('picking a team size starts the pane\'s work; Default stops it', async ($, on) => {
@@ -681,7 +683,7 @@ describe('wiring', () => {
       expect([task?.props.color, task?.props.bold ?? false]).toEqual(['#b0b0b0', false])
       expect(text).toContain('3 agents · 3 working · 1 queued')
       expect(text).toContain('Licenses · Reading the city site')
-      expect(text).toContain(' 40% ▰▰▰▰▱▱▱▱▱▱')
+      expect(text).toContain(' 40% ▰▰▱▱▱▱')
     })
 
     test("a helper's report arriving as a prompt keeps the run; so does the person's next prompt", async ($, on) => {
@@ -724,8 +726,9 @@ describe('wiring', () => {
       expect(text).toContain('3 agents · 3 working · 2 queued')
       expect(text.match(/● /g)).toHaveLength(3)
       // Queued pieces wait above the running ones.
-      expect(text).toContain('○ Dqueued')
-      expect(text.indexOf('○ D')).toBeLessThan(text.indexOf('● A'))
+      // Queued pieces are only counted in the header: they get no line of their own.
+      expect(text).not.toContain('○ D')
+      expect(text).not.toContain('Dqueued')
     })
 
     test('on Default every subagent gets a line: its latest tool call, then ✓ below the running ones once done', async ($, on) => {
@@ -744,8 +747,76 @@ describe('wiring', () => {
       await $.turn.complete({ ...complete('s1', 'agent-1'), answer: 'Surveyed.' })
       text = await dockText($)
       expect(text.indexOf('● Write tests')).toBeLessThan(text.indexOf('✓ Survey the code'))
-      // Default adds nothing to what the subagent is asked.
-      expect(seen.map(s => s.prompt)).toEqual(['look around', 'add tests'])
+      // Default asks the subagent only to report its progress.
+      expect(seen.map(s => s.prompt)).toEqual([`look around${SUBAGENT_NOTE}`, `add tests${SUBAGENT_NOTE}`])
+    })
+
+    test('with no lines to list, the pane says what will appear, for the Showing pick', async ($, on) => {
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+      expect(await pane.find({ text: 'Workflow and tool subagents will appear here when created.' })).toBeDefined()
+      await pane.press({ key: 'showing-tool' })
+      expect(await pane.find({ text: 'Tool subagents will appear here when created.' })).toBeDefined()
+      await pane.press({ key: 'showing-current' })
+      expect(await pane.find({ text: 'Subagents for the current task will appear here when created.' })).toBeDefined()
+      await pane.press({ key: 'team-3' })
+      expect(await pane.find({ text: 'Subagents for the current task will appear here when created.' })).toBeDefined()
+      expect(await pane.find({ text: /^Your next prompt can hand work to 3 / })).toBeDefined()
+      await pane.unmount()
+    })
+
+    test('on the desktop the totem stacks a mini Clawd per running subagent; the terminal draws none', async ($, on) => {
+      coreSpawn(on, [])
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      const totem = async () => {
+        const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
+        const art = await pane.find({ type: 'Svg' })
+        await pane.unmount()
+        return art?.props.alt
+      }
+      expect(await totem()).toBe('Clawd asleep')
+      await spawn($, 'Survey the code', 'look around')
+      await spawn($, 'Write tests', 'add tests')
+      expect(await totem()).toBe('Clawd with 2 mini Clawds stacked on his head')
+      await $.turn.complete({ ...complete('s1', 'agent-1'), answer: 'Surveyed.' })
+      expect(await totem()).toBe('Clawd with 1 mini Clawd stacked on his head')
+      const terminal = await $.ui.mount({ ...DOCK, surface: 'terminal', requestId: 'subagents' })
+      expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
+      await terminal.unmount()
+    })
+
+    test("a running subagent's time ticks each second; a closed pane follows no tool calls", async ($, on) => {
+      coreSpawn(on, [])
+      on('tool.call', { tool: 'Read' }, () => ({ result: 'file text' }))
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await spawn($, 'Survey the code', 'look around')
+      await clock.advance(3000)
+      expect(await dockText($)).toContain('0:03')
+      await run($, 'subagents')
+      await $.tool.call({ tool: 'Read', file_path: '/repo/src/bar.tsx', agentId: 'agent-1' } as never)
+      await run($, 'subagents')
+      expect(await dockText($)).not.toContain('Reading bar.tsx')
+    })
+
+    test('a tool agent that reports progress shows a bar; its line still follows its tool calls', async ($, on) => {
+      coreSpawn(on, [])
+      on('tool.call', { tool: 'Read' }, () => ({ result: 'file text' }))
+      await start($, on, { usd: 0 })
+      await run($, 'subagents')
+      await spawn($, 'Survey the code', 'look around')
+      const reported = await $.tool.call({ tool: 'mcp__aitools__agent_progress', agentId: 'agent-1', doing: 'Mapping the code', percent: 50 })
+      expect(reported.result).toBe('Progress noted.')
+      let text = await dockText($)
+      expect(text).not.toContain('will appear here')
+      expect(text).toContain('● Survey the code · Mapping the code')
+      expect(text).toContain(' 50% ▰▰▰▱▱▱')
+      await $.tool.call({ tool: 'Read', file_path: '/repo/src/bar.tsx', agentId: 'agent-1' } as never)
+      text = await dockText($)
+      expect(text).toContain('● Survey the code · Reading bar.tsx')
+      expect(text).toContain(' 50% ▰▰▰▱▱▱')
     })
 
     test('a running name is half-dim and its activity faint; a finished line is all faint with how long ago', async ($, on) => {
@@ -908,7 +979,7 @@ describe('wiring', () => {
     test('a helper outside the dock reports nothing; the main chat cannot report progress', async ($, on) => {
       await start($, on, { usd: 0 }, { agentTeam: 5 })
       const denied = await $.tool.call({ tool: 'mcp__aitools__agent_progress', doing: 'x', percent: 5 })
-      expect(denied.deny).toBe('Only Subagents helpers report progress.')
+      expect(denied.deny).toBe('Only subagents report progress.')
     })
 
     test('when every helper is done and Claude replies, the dock adds a finish line under the cards', async ($, on) => {

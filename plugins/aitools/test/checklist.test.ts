@@ -36,8 +36,8 @@ describe('progress bars', () => {
   })
 
   test('a bar fills its share of cells', () => {
-    expect(progressBar(40)).toEqual({ filled: '▰▰▰▰', empty: '▱▱▱▱▱▱' })
-    expect(progressBar(0)).toEqual({ filled: '', empty: '▱▱▱▱▱▱▱▱▱▱' })
+    expect(progressBar(50)).toEqual({ filled: '▰▰▰', empty: '▱▱▱' })
+    expect(progressBar(0)).toEqual({ filled: '', empty: '▱▱▱▱▱▱' })
     expect(progressBar(100, 4)).toEqual({ filled: '▰▰▰▰', empty: '' })
   })
 })

@@ -116,7 +116,7 @@ export function stepPercent(item: ChecklistItem): number {
 }
 
 /** Cells in a step's progress bar. */
-export const BAR_CELLS = 10
+export const BAR_CELLS = 6
 
 /** A step's progress bar: filled cells for the share done, light cells for the rest. */
 export function progressBar(percent: number, cells = BAR_CELLS): { filled: string; empty: string } {

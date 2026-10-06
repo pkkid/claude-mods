@@ -88,11 +88,11 @@ turns it off.
 
 ```
 Adding dark mode                                                    3 of 5
-✓ Read the theme code                                   100% ▰▰▰▰▰▰▰▰▰▰
-✓ Add the color tokens                                  100% ▰▰▰▰▰▰▰▰▰▰
-● Wire up the toggle                                     40% ▰▰▰▰▱▱▱▱▱▱
-○ Update tests                                            0% ▱▱▱▱▱▱▱▱▱▱
-○ Run checks                                              0% ▱▱▱▱▱▱▱▱▱▱
+✓ Read the theme code                                       100% ▰▰▰▰▰▰
+✓ Add the color tokens                                      100% ▰▰▰▰▰▰
+● Wire up the toggle                                         40% ▰▰▱▱▱▱
+○ Update tests                                                0% ▱▱▱▱▱▱
+○ Run checks                                                  0% ▱▱▱▱▱▱
 ```
 
 Each step has a bar: full once done, empty until it starts, and for the step in progress Claude's own estimate of how
@@ -119,12 +119,17 @@ request finishes.
 **Subagents** in the **🛠** menu opens the Subagents pane; the pane's own close mark closes it. `/subagents` opens it,
 or closes it if open. It stays open until you close it, and comes back after the mod reloads.
 
+On the desktop, Clawd stands left of the pane's option rows with a mini Clawd stacked on his head for each subagent
+running in the list (the stack stops growing at four), and sleeps in quiet grey when none is. The status line under the options
+sits beside him too. The terminal has no picture.
+
 While it is open, the pane lists every subagent Claude starts, one per line: Agent tool subagents (foreground or
 background), and the agents of a workflow it starts, named after the workflow (`review-changes · agent 3`, since a
-workflow's agents have no names of their own). Pieces waiting for a free helper sit on top, then the ones running
-(oldest first), then the finished ones, the most recently finished first. Marks are Task View's: ○ queued, a blue ●
-running, a ✓ done, and a red × failed. A running subagent's name is a lighter grey, followed in dim grey by what it is
-doing from its latest tool call (`Reading bar.tsx`, `Running npm test`) and its running time. A finished line is all
+workflow's agents have no names of their own). The ones running come first (oldest first), then the finished ones, the
+most recently finished first; pieces waiting for a free helper get no line, only a count in the header. Marks are Task
+View's: a blue ● running, a ✓ done, and a red × failed. A running subagent's name is a lighter grey, followed in dim grey by what it is
+doing from its latest tool call (`Reading bar.tsx`, `Running npm test`) and its running time. A line's name and
+what it is doing take at most 80 characters together, cut with `…`. A finished line is all
 dim (but a failed one's ×): no bar, just how long it ran and how long ago it finished, `0:09 (3m ago)`.
 
 ```
@@ -134,16 +139,15 @@ Set team size: Default  3 [5] 10  20  30
 Set model: [Same as chat] Fast & cheap
 
 5 agents · 3 working · 2 idle · 1 queued · 1 done
-○ Check the zoning rules                                                    queued
-● Research business licenses · Reading the city site               40% ▰▰▰▰▱▱▱▱▱▱  1:20
+● Research business licenses · Reading the city site                   40% ▰▰▱▱▱▱  1:20
 ✓ Draft the floor plan                                                    0:56 (3m ago)
 ```
 
 In each option row the choice in effect is drawn at full strength (shown as `[…]` above); the others are dim, and
 pressing one picks it. They are the same compact buttons as the bar's.
 
-**Set team size** starts on **Default**: subagents run as Claude Code normally runs them, and the pane only lists them (no
-note, no model change, nothing in the status line). Pick a size and the team applies too, with `Subagents` in the
+**Set team size** starts on **Default**: subagents run as Claude Code normally runs them, and the pane lists them (no
+team note, no model change, nothing in the status line); each is only asked to report its progress. Pick a size and the team applies too, with `Subagents` in the
 status line. While the pane is closed nothing is tracked; while it is open but not on screen (the status line then
 reads `Subagents (not shown)`) the team does not apply.
 
@@ -152,13 +156,17 @@ reads `Subagents (not shown)`) the team does not apply.
 - **Set model** (always shown; faint and unpickable on Default): **Same as chat** (the default) uses the chat's
   model and reasoning level; **Fast & cheap** runs every helper request on Sonnet 5.5 at low reasoning.
 - With a size picked, each prompt carries a hidden note asking Claude to split a job with separate parts across the
-  team, starting the pieces in parallel. Each helper's prompt asks it to report what it is doing and how far along it
-  is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`): a helper's line shows its percent (its
-  own estimate) and a bar, where other subagents show their latest tool call instead.
+  team, starting the pieces in parallel.
+- Every subagent Claude starts with its Agent tool while the pane is open (a team helper or not) has its prompt ask it
+  to report how far along it is through the mod's `agent_progress` tool (`mcp__aitools__agent_progress`); once it
+  does, its line shows its percent (its own estimate) and a bar. A helper's line shows what it says it is doing;
+  other subagents' lines follow their latest tool call. Workflow agents, and subagents started before the pane opened,
+  are not asked, so they show no bar.
 - A full team refuses further starts with a note to try again when a helper finishes (a hook may not hold a start for
-  long); those pieces show as queued until they start.
+  long); the header counts those pieces as queued until they start.
 - **Showing**: **All** (the default) lists every line; **Tool agents** leaves out workflow agents (only subagents
-  Claude started with its Agent tool); **Current task** only those started since your last prompt.
+  Claude started with its Agent tool); **Current task** only those started since your last prompt. With nothing to
+  list, the pane says what will appear there, e.g. `Tool subagents will appear here when created.`
 - **Hide completed**: how long a finished line stays: **Never** (the default), **15m**, **5m**, **1m** or
   **Immediate**. Either way the pane keeps at most the newest 50 finished lines.
 - The team, model, Showing and Hide completed picks are saved.
