@@ -87,9 +87,6 @@ terminal (Terminal on macOS, PowerShell on Windows) and run these two commands:
 
 ```bash
 claude plugin marketplace add pkkid/claude-mods
-```
-
-```bash
 claude plugin install aitools@claude-mods
 ```
 
@@ -114,9 +111,6 @@ install Claude Code first by following [its setup guide](https://claude.com/clau
 
   ```bash
   claude plugin marketplace update claude-mods
-  ```
-
-  ```bash
   claude plugin update aitools@claude-mods
   ```
 
