@@ -142,6 +142,8 @@ const encoder = new TextEncoder()
 const TICK_MS = 30_000
 /** Cache times older than this are dropped from the per-session store. */
 const CACHE_KEEP_MS = 2 * 60 * 60_000
+/** Blank rows between the chat and the bar on the terminal, so the last of a reply does not run into it. */
+const TERMINAL_TOP_MARGIN = 1
 
 /** The latest scan, kept here too so a store write that fails costs nothing but persistence. */
 let memoryCache: ScanCache | null = null
@@ -1369,10 +1371,14 @@ export const register: Register = on => {
     // The mascot is SVG: the terminal never gets it, whatever its table holds.
     const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
     const bar = await drawBar($, { Box: el.Box, Text: el.Text, Button: el.Button, Svg }, e.props.isWorking)
-    if (below.type === 'engine') return bar
     const { Box } = el
+    // The terminal sets the bar off from the chat above by a blank line; the desktop's band has its own room.
+    const top = e.surface === 'terminal' ? TERMINAL_TOP_MARGIN : 0
+    if (below.type === 'engine') {
+      return top ? <Box flexDirection="column" width="100%" marginTop={top}>{bar}</Box> : bar
+    }
     return (
-      <Box flexDirection="column" width="100%" gap={1}>
+      <Box flexDirection="column" width="100%" gap={1} marginTop={top}>
         {bar}
         {below}
       </Box>
