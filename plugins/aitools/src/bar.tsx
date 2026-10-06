@@ -204,6 +204,7 @@ export function renderBar(
   on: {
     toggleTools(): void
     handoff(): void
+    openNotes(): void
     setView(mode: ViewMode): void
     openDock(): void
     toggleSettings(): void
@@ -282,6 +283,7 @@ export function renderBar(
           {...QUIET}
           onPress={() => isHandoffIdle && on.handoff()}
         />
+        <Button key="notes" label="Notes" {...QUIET} onPress={() => on.openNotes()} />
         <Button key="subagents" label="Subagents" {...QUIET} onPress={() => on.openDock()} />
         {VIEWS.map(v => (
           <Button

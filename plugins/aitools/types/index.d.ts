@@ -37,6 +37,9 @@ export type Snapshot = {
 /** The handoff pane's content: the brief being written, the brief itself, or why there is none. */
 export type Brief = { status: 'writing' | 'ready' | 'error'; text: string }
 
+/** The note as read when the Notes pane opened, or why it could not be read; null while it loads. */
+export type NotesFile = { text: string } | { error: string } | null
+
 /** Which checklist view is on: Task View keeps the chat as is, Clean View hides tool calls and in-progress replies. */
 export type ViewMode = 'off' | 'task' | 'clean'
 
@@ -139,6 +142,10 @@ declare module 'claude-code' {
       finals: string[]
       /** Whether the Subagents pane is open; closed, none of its settings apply. Not kept across sessions. */
       isDockOpen: boolean
+      /** Whether the Notes pane is open, so a reload opens it again. Not kept across sessions. */
+      isNotesOpen: boolean
+      /** The note as read when the pane opened: the editor keeps its own text after that. */
+      notes: NotesFile
       /** The dock's team size and helper model; mirrored in $.store. */
       team: TeamPick
       helpers: HelperMode

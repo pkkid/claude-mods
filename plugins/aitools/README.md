@@ -69,10 +69,23 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Subagents**, **Task View** and
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Task View** and
 **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
+
+## Notes
+
+**Notes** in the **🛠** menu opens a **Notes** pane with one text box for a single scratch note. It is kept in
+`.claude/notes.md` under the project root, a plain Markdown file you can open anywhere else too, and saved as you
+type. **Copy**, at the end of the line above the box, copies the note to the clipboard. Add `.claude/notes.md` to the
+project's `.gitignore` if it should stay out of git.
+
+Click in the box to type. Enter starts a new line, the arrows, Home and End move the cursor (Ctrl+A and Ctrl+E too),
+Page Up and Page Down move ten rows, and Backspace and Delete remove. Escape hands the keys back to the prompt. There
+is no selection or undo. Pasting works in the terminal but not in the desktop app, where a mod cannot read the
+clipboard; paste into `.claude/notes.md` in another editor and reopen the pane instead. The pane stays open until you close it, and comes back after the mod reloads.
+Where a surface cannot draw the box (VS Code, the mobile app), the pane says where the note is kept instead.
 
 ## Task View and Clean View
 

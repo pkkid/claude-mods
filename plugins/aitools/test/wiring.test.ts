@@ -1223,6 +1223,103 @@ describe('wiring', () => {
     })
   })
 
+  describe('Notes', () => {
+    const FILE = '/p/.claude/notes.md'
+
+    /** A disk holding `files`, by path; a read of `unreadable` fails. */
+    function disk(on: On, files: Map<string, string>, unreadable?: string) {
+      on('session.root', () => ({ value: '/p' }))
+      on('fs.exists', (_, e) => ({ value: files.has(e.path) || e.path === unreadable }))
+      on('fs.read', (_, e) => {
+        if (e.path === unreadable) throw new Error('EACCES: permission denied')
+        return { value: files.get(e.path) ?? '' }
+      })
+      on('fs.write', (_, e) => {
+        files.set(e.path, e.text)
+        return { value: undefined }
+      })
+    }
+
+    const notesPane = (surface: 'terminal' | 'desktop') => ({
+      plugin: 'aitools',
+      surface,
+      component: 'Pane' as const,
+      requestId: 'notes',
+      props: { ...PANE, title: 'Notes' },
+    })
+
+    test("the 🛠 menu's Notes, right after Handoff, opens the note as saved", async ($, on) => {
+      const files = new Map([[FILE, 'Buy milk']])
+      disk(on, files)
+      const panes = await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tools' })
+      const keys = (await ui.findAll({ type: 'Button' })).map(b => b.props.key)
+      expect(keys.indexOf('notes')).toBe(keys.indexOf('handoff') + 1)
+      await ui.press({ key: 'notes' })
+      await ui.unmount()
+      expect(panes.open.has('notes')).toBe(true)
+      const pane = await $.ui.mount(notesPane('desktop'))
+      expect((await pane.find({ type: 'Client' }))?.props.props).toEqual({ text: 'Buy milk', columns: 80 })
+      const saved = (await pane.findAll({ type: 'Text' }))[0]
+      expect([saved?.text, saved?.props.color]).toEqual(['Note saved to .claude/notes.md in your project.', '#808080'])
+      await pane.unmount()
+    })
+
+    test('Copy copies the note as it stands, typing included', async ($, on) => {
+      const copies: string[] = []
+      on('ui.copy', (_, e) => {
+        copies.push(e.text)
+        return { value: { isCopied: true as const } }
+      })
+      disk(on, new Map([[FILE, 'Buy milk']]))
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tools' })
+      await ui.press({ key: 'notes' })
+      await ui.unmount()
+      const pane = await $.ui.mount(notesPane('desktop'))
+      await pane.key({ key: '!' })
+      await pane.press({ key: 'copy' })
+      await pane.unmount()
+      expect(copies).toEqual(['Buy milk!'])
+    })
+
+    for (const surface of ['terminal', 'desktop'] as const) {
+      test(`on the ${surface}, what is typed is saved to .claude/notes.md`, async ($, on) => {
+        const files = new Map<string, string>()
+        disk(on, files)
+        await start($, on, { usd: 0 })
+        const ui = await $.ui.mount(band())
+        await ui.press({ key: 'tools' })
+        await ui.press({ key: 'notes' })
+        await ui.unmount()
+        const pane = await $.ui.mount(notesPane(surface))
+        for (const key of ['h', 'i', 'return', 'there']) {
+          await pane.key({ key })
+        }
+        await pane.key({ key: 'backspace' })
+        await pane.unmount()
+        expect(files.get(FILE)).toBe('hi\nther')
+      })
+    }
+
+    test('a note that cannot be read shows why, and nothing writes over it', async ($, on) => {
+      const files = new Map<string, string>()
+      disk(on, files, FILE)
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'tools' })
+      await ui.press({ key: 'notes' })
+      await ui.unmount()
+      const pane = await $.ui.mount(notesPane('desktop'))
+      expect(await pane.find({ type: 'Client' })).toBeUndefined()
+      expect((await pane.find({ type: 'Text' }))?.text).toContain('Could not read .claude/notes.md')
+      await pane.unmount()
+      expect(files.has(FILE)).toBe(false)
+    })
+  })
+
   describe('features turned off do no work', () => {
     const command = ($: Engine, name: string, args = '') =>
       $.command.run({ command: name, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })

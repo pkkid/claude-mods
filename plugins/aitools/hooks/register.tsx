@@ -31,6 +31,7 @@ import {
   CHECKLIST_SPEC,
   CHECKLIST_TOOL_ID,
   VIEW_NAMES,
+  FAINT_TEXT,
   addFinal,
   finalReplies,
   isFinalReply,
@@ -88,8 +89,15 @@ const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
 const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
 const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
 const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as const, false)
+const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
+const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
 
 const HANDOFF_PANE = 'handoff'
+const NOTES_PANE = 'notes'
+/** The note's file, under the session's project root. */
+const NOTES_FILE = '.claude/notes.md'
+/** The editor's key in the Notes pane. */
+const NOTES_EDITOR = 'notes-editor'
 
 /** Prompt origins that are the person's own words; anything else (a helper's report, a notice) is not a new request. */
 const PERSON_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'sdk'])
@@ -123,6 +131,10 @@ let isTurnRunning = false
 let dockTimer: Timer | null = null
 /** The model tools registered so far: each is offered to the model only once its feature is first turned on. */
 const registeredTools = new Set<string>()
+/** The note's writes, one after another, so the last text typed is the one left on disk. */
+let notesSaving: Promise<void> = Promise.resolve()
+/** The note as it stands: as loaded, then as the editor last posted it. What Copy copies. */
+let latestNotes = ''
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
 
@@ -307,6 +319,55 @@ async function handoff($: EngineInterface): Promise<string> {
   $.ui.toast(copied.isCopied ? 'Handoff brief copied to the clipboard' : 'Handoff brief ready (copy failed)')
 
   return handoffOutput(written.text)
+}
+
+/** Where the note is kept: `.claude/notes.md` under the session's project root. */
+async function notesPath($: EngineInterface): Promise<string> {
+  return `${(await $.session.root()).replace(/[\\/]$/, '')}/${NOTES_FILE}`
+}
+
+/**
+ * Reads the note for the pane, once any write still going has landed: none yet is an empty note; a file that is there
+ * but cannot be read is an error, so the editor never writes over it.
+ */
+async function loadNotes($: EngineInterface): Promise<void> {
+  await update($, notes, () => null)
+  await notesSaving
+  const path = await notesPath($)
+  let loaded: { text: string } | { error: string }
+  if (!(await $.fs.exists(path).catch(() => false))) {
+    loaded = { text: '' }
+  } else {
+    loaded = await $.fs.read(path).then(
+      text => (typeof text === 'string' ? { text } : { error: `${NOTES_FILE} is not text.` }),
+      (err: unknown) => ({ error: `Could not read ${NOTES_FILE}: ${errorText(err)}` }),
+    )
+  }
+  latestNotes = 'text' in loaded ? loaded.text : ''
+  await update($, notes, () => loaded)
+}
+
+/** The 🛠 menu's Notes: opens the Notes pane on the note as saved, its keys handed to the editor. */
+async function openNotes($: EngineInterface): Promise<void> {
+  await update($, isToolsOpen, () => false)
+  await update($, isNotesOpen, () => true)
+  await $.ui.open({ id: NOTES_PANE, title: 'Notes', focus: true })
+  await loadNotes($)
+  await $.ui.focus({ requestId: NOTES_PANE, key: NOTES_EDITOR }).catch(() => undefined)
+}
+
+/** Saves the note as the editor posted it, after any write before it. */
+function saveNotes($: EngineInterface, text: string): void {
+  latestNotes = text
+  notesSaving = notesSaving
+    .then(async () => $.fs.write(await notesPath($), text))
+    .catch((err: unknown) => $.ui.log(`aitools: could not save ${NOTES_FILE}: ${errorText(err)}`))
+}
+
+/** The Notes pane's Copy: the note as it stands, to the clipboard of the surface pressed on. */
+async function copyNotes($: EngineInterface, surface: Parameters<EngineInterface['ui']['copy']>[0]['surface']): Promise<void> {
+  const copied = await $.ui.copy({ text: latestNotes, surface })
+  $.ui.toast(copied.isCopied ? 'Note copied to the clipboard' : 'Copy failed')
 }
 
 /** The 🛠 menu's Handoff: writes the brief into the handoff pane, which has its own Copy button. */
@@ -769,6 +830,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
   return renderBar(el, view, flags, {
     toggleTools: () => void toggleMenu($, 'tools'),
     handoff: () => void showHandoff($),
+    openNotes: () => void openNotes($),
     toggleSettings: () => void toggleMenu($, 'settings'),
     setView: mode => void setView($, mode),
     openDock: () => void openDock($),
@@ -880,6 +942,11 @@ export const register: Register = on => {
       await $.ui.open({ id: DOCK_PANE, title: 'Subagents' })
     }
     await syncDock($)
+    // The Notes pane went with the old module too: it opens again on the note as saved.
+    if ((await read($, isNotesOpen)) && !(await $.ui.panes()).some(p => p.id === NOTES_PANE)) {
+      await $.ui.open({ id: NOTES_PANE, title: 'Notes' })
+      await loadNotes($)
+    }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
 
@@ -1154,7 +1221,49 @@ export const register: Register = on => {
 
   // The person closing the dock pane turns the dock off; the mod's own close has already, and an unload (a reload)
   // leaves the setting for the pane the next load opens.
+  on('ui.render', { component: 'Pane', requestId: NOTES_PANE }, async ($, e) => {
+    const el = $.ui.resolve(e)
+    const { Box, Text, Button } = el
+    const shown = await read($, notes)
+    if (shown === null) {
+      return <Text dimColor>Loading the note…</Text>
+    }
+    if ('error' in shown) {
+      return <Text color="red">{shown.error}</Text>
+    }
+    if (!('Client' in el)) {
+      return <Text dimColor>{`The note can't be edited here; it is kept in ${NOTES_FILE}.`}</Text>
+    }
+    const { Client } = el
+
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color={FAINT_TEXT}>{`Note saved to ${NOTES_FILE} in your project.`}</Text>
+          <Button key="copy" label="Copy" plain dimColor onPress={press => void copyNotes($, press.surface)} />
+        </Box>
+        <Client key={NOTES_EDITOR} module="../src/noteseditor.tsx" props={{ text: shown.text, columns: e.props.bodyColumns }} />
+      </Box>
+    )
+  })
+
+  // The editor posts the whole note after each change.
+  on('ui.message', async ($, e, next) => {
+    if (e.requestId !== NOTES_PANE) {
+      return next(e)
+    }
+    const data = e.data as { text?: unknown } | null
+    if (typeof data?.text === 'string') {
+      saveNotes($, data.text)
+    }
+
+    return {}
+  })
+
   on('ui.close', async ($, e, next) => {
+    if (e.id === NOTES_PANE && e.origin.kind === 'person') {
+      await update($, isNotesOpen, () => false)
+    }
     if (e.id === DOCK_PANE && e.origin.kind === 'person') {
       await update($, isDockOpen, () => false)
       await syncDock($)

@@ -1,4 +1,5 @@
 node_modules/
 .claude/types/
+.claude/notes.md
 *.log
 plugins/*/tsconfig.json
