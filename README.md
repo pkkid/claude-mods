@@ -3,7 +3,7 @@
 **AI Tools** is a mod for [Claude Code](https://claude.com/claude-code) that adds one slim ribbon above the prompt.
 At a glance it shows how much of your Claude subscription you have used, how full the conversation is, and what the
 work would have cost at API prices. Behind two small buttons it adds a live checklist of Claude's plan, a panel for
-watching subagents, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
+watching subagents, a panel for tidying up worktrees, and a one-click handoff to a fresh session. In the desktop app, Clawd, Claude Code's pixel mascot,
 stands at the start of the bar acting out what Claude is doing.
 
 It works in the **Code tab of the Claude desktop app** and in the **`claude` terminal app**.
@@ -62,6 +62,18 @@ run helpers on a faster, cheaper model. Leave it on **Default** to just watch.
 
 ![The Subagents pane](docs/images/subagents.svg)
 
+### Worktrees
+
+Worktrees from finished sessions pile up. The **Worktrees** pane lists every worktree of the project, the main checkout
+first, each with what it still holds (changed files, unpushed commits, merged, its pull request), how old it is, lines
+added and removed, whether CI passed, and a × to delete it.
+
+**Clean worktrees** removes every worktree that is merged and has nothing uncommitted, with its local and remote
+branch, after asking first. Anything with work in it stays. Clawd prunes a tree beside the list, sweeps up while
+worktrees are removed, and naps when there are none. The pane only reads git while it is open.
+
+![The Worktrees pane](docs/images/worktrees.svg)
+
 ### Handoff
 
 **Handoff** asks Claude for a short brief of the conversation: the goal, where things stand, decisions made, and the
@@ -78,6 +90,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 | `/handoff` | Write a handoff brief into the chat and copy it |
 | `/taskview`, `/cleanview` | Turn Task View or Clean View on or off |
 | `/subagents` | Open or close the Subagents pane |
+| `/worktrees` | Open or close the Worktrees pane |
 
 The full reference for every option is in the [mod's own README](plugins/aitools/README.md).
 
