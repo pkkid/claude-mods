@@ -219,6 +219,7 @@ export function renderBar(
     openNotes(): void
     setView(mode: ViewMode): void
     openDock(): void
+    openWorktrees(): void
     toggleSettings(): void
     toggle(key: ToggleKey): void
   },
@@ -299,6 +300,7 @@ export function renderBar(
         />
         <Button key="notes" label="Notes" {...QUIET} onPress={() => on.openNotes()} />
         <Button key="subagents" label="Subagents" {...QUIET} onPress={() => on.openDock()} />
+        <Button key="worktrees" label="Worktrees" {...QUIET} onPress={() => on.openWorktrees()} />
         {VIEWS.map(v => (
           <Button
             key={v.mode}
