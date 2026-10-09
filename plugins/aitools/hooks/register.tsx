@@ -53,10 +53,34 @@ import {
   isQuestionOpenIn,
   mascotDrawing,
 } from '../src/mascot'
+import {
+  AFTER_TOOL_MS,
+  BRANCH_FORMAT,
+  CHANGING_TOOLS,
+  GITHUB_EVERY,
+  REFRESH_MS,
+  SWEEP_MS,
+  WORKTREES_PANE,
+  countChanged,
+  firstLine,
+  isCleanable,
+  isDeletable,
+  parseBranchRefs,
+  parsePrs,
+  parseRuns,
+  parseShortstat,
+  parseWorktreeList,
+  removedText,
+  renderWorktrees,
+  toWorktree,
+  worktreeName,
+} from '../src/worktrees'
+import type { PrFacts, Removal, WorktreeFacts } from '../src/worktrees'
 import { DEFAULT_SETTINGS, loadSettings, nextHidden, normalizeSettings, saveSettings } from '../src/settings'
 import type { KeyStore } from '../src/settings'
 import { scanMonth, sessionTokens, sessionUsd, usageTokens } from '../src/transcripts'
 import type { ScanCache, ScanIO } from '../src/transcripts'
+import type { CiState, Worktree, WorktreeTarget } from '../types'
 import type { AgentKind, AgentShowing, Brief, HelperMode, HideAfter, LimitWindow, MascotPose, MascotState, Snapshot, TeamPick, TeamSize, ToggleKey, ViewMode } from '../types'
 
 // The engine follows `$` only into functions declared in this file, so every
@@ -91,6 +115,9 @@ const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
 const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as const, false)
 const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
 const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
+const isWorktreesOpen = atom({ plugin: 'aitools', key: 'isWorktreesOpen' } as const, false)
+const worktrees = atom({ plugin: 'aitools', key: 'worktrees' } as const, null)
+const worktreeAction = atom({ plugin: 'aitools', key: 'worktreeAction' } as const, null)
 
 const HANDOFF_PANE = 'handoff'
 const NOTES_PANE = 'notes'
@@ -137,6 +164,19 @@ let notesSaving: Promise<void> = Promise.resolve()
 let latestNotes = ''
 /** Trace writes run one after another, so lines written at once are all kept. */
 let traceQueue: Promise<void> = Promise.resolve()
+/** The Worktrees pane's timers: its regular read, and the one a changing tool sets. Running only while it is open. */
+let worktreeTimer: Timer | null = null
+let worktreeSoon: Timer | null = null
+/** Reads of the pane so far since it opened: every GITHUB_EVERY-th asks GitHub too. */
+let worktreeReads = 0
+/** The read in flight, and whether another (with GitHub's or not) waits for it to finish. */
+let worktreeReading: Promise<void> | null = null
+let worktreeQueued: { withGithub: boolean } | null = null
+/** The branch merges are measured against, found once each time the pane opens. */
+let worktreeBase: string | null = null
+/** GitHub's word, as last read: pull requests by branch and CI by commit. Dropped when the pane closes. */
+let githubPrs = new Map<string, PrFacts[]>()
+let githubRuns = new Map<string, CiState>()
 
 const encoder = new TextEncoder()
 const TICK_MS = 30_000
@@ -836,6 +876,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     toggleSettings: () => void toggleMenu($, 'settings'),
     setView: mode => void setView($, mode),
     openDock: () => void openDock($),
+    openWorktrees: () => void openWorktrees($),
     toggle: key => void toggleSetting($, key),
   }, list)
 }
@@ -872,6 +913,256 @@ async function measure($: EngineInterface, e: { rateLimits: readonly { kind: str
     await $.store.set('burn', burn)
   }
   await update($, projection, () => project(burn, now))
+}
+
+/** Git without prompts (a push that needs a password fails rather than waits) or the index refresh `status` writes. */
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
+
+/** Runs git in `cwd`; a git that cannot start reads as a failed run. */
+async function git($: EngineInterface, args: readonly string[], cwd: string, timeoutMs?: number) {
+  try {
+    return await $.process.run(['git', ...args], { cwd, env: GIT_ENV, timeoutMs })
+  } catch (error) {
+    return { exitCode: 1, stdout: '', stderr: String(error), isStdoutTruncated: false, isStderrTruncated: false }
+  }
+}
+
+/** The branch merges are measured against: origin's default, else origin/main or master, else a local main or master. */
+async function findBase($: EngineInterface, root: string, fallback: string | null): Promise<string> {
+  const head = await git($, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], root)
+  if (head.exitCode === 0 && head.stdout.trim()) {
+    return head.stdout.trim()
+  }
+  for (const name of ['origin/main', 'origin/master', 'main', 'master']) {
+    if ((await git($, ['rev-parse', '--verify', '--quiet', name], root)).exitCode === 0) {
+      return name
+    }
+  }
+
+  return fallback ?? 'HEAD'
+}
+
+/** GitHub's pull requests and CI runs, through `gh`; left as they were when it is missing or signed out. */
+async function readGithub($: EngineInterface, root: string): Promise<void> {
+  const gh = (args: string[]) =>
+    $.process.run(['gh', ...args], { cwd: root, env: { GH_PROMPT_DISABLED: '1' }, timeoutMs: 20_000 }).catch(() => null)
+  const [prs, runs] = await Promise.all([
+    gh(['pr', 'list', '--state', 'all', '--limit', '100', '--json', 'number,url,state,headRefName,headRefOid,statusCheckRollup']),
+    gh(['run', 'list', '--limit', '100', '--json', 'headSha,status,conclusion']),
+  ])
+  if (prs?.exitCode === 0) githubPrs = parsePrs(prs.stdout)
+  if (runs?.exitCode === 0) githubRuns = parseRuns(runs.stdout)
+}
+
+/** What git says of one worktree: its changes, its commits the base lacks, its last commit, its lines added and removed. */
+async function readWorktree($: EngineInterface, f: Omit<WorktreeFacts, 'changedFiles' | 'ahead' | 'added' | 'removed' | 'committedAt'>, root: string, base: string): Promise<WorktreeFacts> {
+  const { entry } = f
+  if (entry.isMissing) {
+    // No folder to look in: its branch's commits are counted from the main checkout.
+    const ahead = entry.branch === null ? null : await git($, ['rev-list', '--count', `${base}..${entry.branch}`], root)
+    return { ...f, changedFiles: 0, ahead: Number(ahead?.stdout.trim() || 0), added: 0, removed: 0 }
+  }
+  const [status, ahead, mergeBase, last] = await Promise.all([
+    git($, ['status', '--porcelain'], entry.path),
+    git($, ['rev-list', '--count', `${base}..HEAD`], entry.path),
+    git($, ['merge-base', 'HEAD', base], entry.path),
+    git($, ['log', '-1', '--format=%ct'], entry.path),
+  ])
+  const stat = mergeBase.exitCode === 0 ? await git($, ['diff', '--shortstat', mergeBase.stdout.trim()], entry.path) : null
+
+  return {
+    ...f,
+    changedFiles: countChanged(status.stdout),
+    ahead: Number(ahead.stdout.trim() || 0),
+    committedAt: last.exitCode === 0 && last.stdout.trim() ? Number(last.stdout.trim()) * 1000 : null,
+    ...parseShortstat(stat?.stdout ?? ''),
+  }
+}
+
+/** Reads every worktree of the session's repository into the pane, GitHub's word too when asked. */
+async function readWorktrees($: EngineInterface, withGithub: boolean): Promise<void> {
+  const cwd = await $.session.cwd()
+  const top = await git($, ['rev-parse', '--show-toplevel'], cwd)
+  if (top.exitCode !== 0) {
+    await update($, worktrees, () => ({ status: 'error' as const, text: "This folder isn't in a git repository." }))
+    return
+  }
+  const entries = parseWorktreeList((await git($, ['worktree', 'list', '--porcelain'], cwd)).stdout)
+  const main = entries[0]
+  if (main === undefined) {
+    await update($, worktrees, () => ({ status: 'error' as const, text: "Git didn't list any worktrees." }))
+    return
+  }
+  const root = main.path
+  worktreeBase ??= await findBase($, root, main.branch)
+  const base = worktreeBase
+  const current = top.stdout.trim()
+  const [refsRun] = await Promise.all([
+    git($, ['for-each-ref', `--format=${BRANCH_FORMAT}`, 'refs/heads'], root),
+    withGithub ? readGithub($, root) : Promise.resolve(),
+  ])
+  const refs = parseBranchRefs(refsRun.stdout)
+  const facts = await Promise.all(
+    entries.map((entry, i) =>
+      readWorktree($, { entry, isMain: i === 0, isCurrent: entry.path === current, ref: entry.branch === null ? undefined : refs.get(entry.branch) }, root, base),
+    ),
+  )
+  // Closed while reading: nothing is shown, so nothing is kept.
+  if (!(await read($, isWorktreesOpen))) {
+    return
+  }
+  await update($, worktrees, () => ({ status: 'ready' as const, base, worktrees: facts.map(f => toWorktree(f, githubPrs, githubRuns)) }))
+}
+
+/**
+ * Reads the pane again while it is open, one read at a time: a read asked for while one runs waits for it, and
+ * several asked for meanwhile come to one.
+ */
+async function refreshWorktrees($: EngineInterface, withGithub = false): Promise<void> {
+  if (!(await read($, isWorktreesOpen))) {
+    return
+  }
+  if (worktreeReading !== null) {
+    worktreeQueued = { withGithub: withGithub || (worktreeQueued?.withGithub ?? false) }
+    return
+  }
+  worktreeReading = readWorktrees($, withGithub).catch(async error => {
+    await update($, worktrees, () => ({ status: 'error' as const, text: `Couldn't read the worktrees: ${String(error)}` }))
+  })
+  await worktreeReading
+  worktreeReading = null
+  const queued = worktreeQueued
+  worktreeQueued = null
+  if (queued !== null) {
+    await refreshWorktrees($, queued.withGithub)
+  }
+}
+
+/** The pane's regular read, GitHub's every GITHUB_EVERY-th time; none while it removes worktrees. */
+async function onWorktreeTick($: EngineInterface): Promise<void> {
+  worktreeReads += 1
+  if ((await read($, worktreeAction))?.step !== 'busy') {
+    await refreshWorktrees($, worktreeReads % GITHUB_EVERY === 0)
+  }
+}
+
+/** Runs the pane's reads only while it is open; closed, its timers stop and GitHub's word is dropped. */
+function syncWorktrees($: EngineInterface, isOpen: boolean): void {
+  if (isOpen) {
+    worktreeTimer ??= $.clock.every(REFRESH_MS, () => void onWorktreeTick($))
+    return
+  }
+  worktreeTimer?.cancel()
+  worktreeSoon?.cancel()
+  worktreeTimer = null
+  worktreeSoon = null
+  worktreeReads = 0
+  worktreeBase = null
+  githubPrs = new Map()
+  githubRuns = new Map()
+}
+
+/** Opens or closes the Worktrees pane; opening reads everything at once, GitHub included. */
+async function setWorktreesOpen($: EngineInterface, isOpen: boolean): Promise<void> {
+  await update($, isWorktreesOpen, () => isOpen)
+  syncWorktrees($, isOpen)
+  if (!isOpen) {
+    await $.ui.close({ id: WORKTREES_PANE })
+    return
+  }
+  await update($, worktreeAction, () => null)
+  await update($, worktrees, list => (list?.status === 'ready' ? list : { status: 'loading' as const }))
+  await $.ui.open({ id: WORKTREES_PANE, title: 'Worktrees' })
+  void refreshWorktrees($, true)
+}
+
+/** The 🛠 menu's Worktrees: opens the pane (its own close mark closes it), and closes the menu. */
+async function openWorktrees($: EngineInterface): Promise<void> {
+  await update($, isToolsOpen, () => false)
+  await setWorktreesOpen($, true)
+}
+
+/** After a tool that can change files, the open pane reads again shortly: a burst of calls reads once. */
+function worktreesSoon($: EngineInterface): void {
+  worktreeSoon?.cancel()
+  worktreeSoon = $.clock.after(AFTER_TOOL_MS, () => {
+    worktreeSoon = null
+    void refreshWorktrees($)
+  })
+}
+
+/**
+ * Removes one worktree, then its branch; its remote branch too when merged (an unmerged one's may hold the only copy
+ * of its commits, so it stays). `force` removes a worktree with changes.
+ */
+async function removeWorktree($: EngineInterface, w: Worktree, root: string, force: boolean): Promise<Removal> {
+  const result: Removal = { name: worktreeName(w), isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false }
+  const removed = w.isMissing
+    ? await git($, ['worktree', 'prune'], root)
+    : await git($, ['worktree', 'remove', ...(force ? ['--force'] : []), w.path], root, 60_000)
+  if (removed.exitCode !== 0) {
+    return { ...result, error: firstLine(removed.stderr) }
+  }
+  result.isRemoved = true
+  if (w.branch !== null) {
+    // Whether it is merged is the pane's own reckoning (a squash merge included), so git is not asked again.
+    result.isBranchDeleted = (await git($, ['branch', '-D', w.branch], root)).exitCode === 0
+    if (w.remote !== null && w.isMerged) {
+      result.isRemoteDeleted = (await git($, ['push', w.remote.name, '--delete', w.remote.branch], root, 60_000)).exitCode === 0
+    }
+  }
+
+  return result
+}
+
+/**
+ * Carries out what the pane asked and the person said yes to: every worktree Clean may remove, or the one row. The
+ * rows are read again first, so nothing changed since the last read is removed on stale facts. Clawd sweeps meanwhile,
+ * for SWEEP_MS at least.
+ */
+async function confirmWorktrees($: EngineInterface): Promise<void> {
+  const action = await read($, worktreeAction)
+  if (action?.step !== 'ask') {
+    return
+  }
+  const target: WorktreeTarget = action.target
+  const startedAt = await $.clock.now()
+  await update($, worktreeAction, () => ({ step: 'busy' as const, target }))
+  await worktreeReading
+  await readWorktrees($, false).catch(() => undefined)
+  const list = await read($, worktrees)
+  const rows = list?.status === 'ready' ? list.worktrees : []
+  const root = rows.find(w => w.isMain)?.path ?? (await $.session.cwd())
+  const results: Removal[] = []
+  if (target.kind === 'clean') {
+    for (const w of rows.filter(isCleanable)) {
+      results.push(await removeWorktree($, w, root, false))
+    }
+    await git($, ['worktree', 'prune'], root)
+  } else {
+    const w = rows.find(row => row.path === target.path)
+    if (w === undefined) {
+      results.push({ name: target.path, isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false, error: 'it is no longer listed' })
+    } else if (!isDeletable(w)) {
+      results.push({ name: worktreeName(w), isRemoved: false, isBranchDeleted: false, isRemoteDeleted: false, error: 'it is in use' })
+    } else {
+      results.push(await removeWorktree($, w, root, !isCleanable(w)))
+    }
+  }
+  const done = removedText(results)
+  await readWorktrees($, false).catch(() => undefined)
+  const finish = () => void update($, worktreeAction, () => ({ step: 'done' as const, ...done }))
+  const left = SWEEP_MS - ((await $.clock.now()) - startedAt)
+  if (left > 0) {
+    $.clock.after(left, finish)
+  } else {
+    finish()
+  }
+}
+
+/** Sets the pane's question; a press while worktrees are being removed changes nothing. */
+async function askWorktrees($: EngineInterface, target: WorktreeTarget | null): Promise<void> {
+  await update($, worktreeAction, action => (action?.step === 'busy' ? action : target === null ? null : { step: 'ask' as const, target }))
 }
 
 export const register: Register = on => {
@@ -948,6 +1239,11 @@ export const register: Register = on => {
     if ((await read($, isNotesOpen)) && !(await $.ui.panes()).some(p => p.id === NOTES_PANE)) {
       await $.ui.open({ id: NOTES_PANE, title: 'Notes' })
       await loadNotes($)
+    }
+    await $.command.register({ name: 'worktrees', description: 'Open or close the Worktrees pane' })
+    // The Worktrees pane went with the old module too, its timers with it: it opens again and reads afresh.
+    if (await read($, isWorktreesOpen)) {
+      await setWorktreesOpen($, true)
     }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
     startScan($)
@@ -1195,6 +1491,26 @@ export const register: Register = on => {
     return { text: `Subagents open: ${size} ${HELPER_LABELS[await read($, helpers)]} helpers.` }
   })
 
+  on('command.run', { command: 'worktrees' }, async $ => {
+    const isOpen = !(await read($, isWorktreesOpen))
+    await setWorktreesOpen($, isOpen)
+
+    return { text: isOpen ? 'Worktrees open.' : 'Worktrees closed.' }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: WORKTREES_PANE }, async ($, e) => {
+    const view = { list: await read($, worktrees), action: await read($, worktreeAction), now: await $.clock.now() }
+    const el = $.ui.resolve(e)
+    // Clawd is SVG: the terminal never gets him, whatever its table holds.
+    const Svg = e.surface !== 'terminal' && 'Svg' in el ? el.Svg : undefined
+
+    return renderWorktrees({ Box: el.Box, Text: el.Text, Button: el.Button, Svg }, view, {
+      ask: target => void askWorktrees($, target),
+      confirm: () => void confirmWorktrees($),
+      cancel: () => void askWorktrees($, null),
+    })
+  })
+
   on('ui.render', { component: 'Pane', requestId: DOCK_PANE }, async ($, e) => {
     await read($, dockTick)
     // The 30-second tick keeps finished lines' `3m ago` current.
@@ -1266,6 +1582,10 @@ export const register: Register = on => {
     if (e.id === NOTES_PANE && e.origin.kind === 'person') {
       await update($, isNotesOpen, () => false)
     }
+    if (e.id === WORKTREES_PANE && e.origin.kind === 'person') {
+      await update($, isWorktreesOpen, () => false)
+      syncWorktrees($, false)
+    }
     if (e.id === DOCK_PANE && e.origin.kind === 'person') {
       await update($, isDockOpen, () => false)
       await syncDock($)
@@ -1281,45 +1601,52 @@ export const register: Register = on => {
   // A subagent with a line in the Subagents pane shows its latest tool call there, while the pane is open:
   // `Reading bar.tsx`, `Running npm test`.
   on('tool.call', async ($, e, next) => {
-    if (e.agentId !== undefined) {
-      if (trackedAgents.has(e.agentId) && (await read($, isDockOpen))) {
-        const id = e.agentId
-        const doing = activityText(e.tool, e as unknown as Record<string, unknown>)
-        await update($, agentRun, run => (run === null ? run : noteActivity(run, id, doing)))
-      }
-      return next(e)
-    }
-    if (QUIET_TOOLS.has(e.tool) || !(await isMascotOn($))) {
-      return next(e)
-    }
-    if (e.tool === 'AskUserQuestion') {
-      await update($, asking, n => n + 1)
-      await showMascot($, 'puzzled', 'working')
-      try {
-        return await next(e)
-      } finally {
-        await update($, asking, n => Math.max(0, n - 1))
-        await showMascot($, 'working')
-      }
-    }
-    const isReading = READ_TOOLS.has(e.tool)
-    if (isReading) {
-      readsInFlight += 1
-      await showMascot($, 'reading', 'working')
-    }
-    let isFailed = true
     try {
-      const result = await next(e)
-      isFailed = result.deny !== undefined || result.isError === true
-      return result
-    } finally {
-      if (isReading) {
-        readsInFlight = Math.max(0, readsInFlight - 1)
+      if (e.agentId !== undefined) {
+        if (trackedAgents.has(e.agentId) && (await read($, isDockOpen))) {
+          const id = e.agentId
+          const doing = activityText(e.tool, e as unknown as Record<string, unknown>)
+          await update($, agentRun, run => (run === null ? run : noteActivity(run, id, doing)))
+        }
+        return next(e)
       }
-      if (isFailed) {
-        await showMascot($, 'error', readsInFlight > 0 ? 'reading' : 'working')
-      } else if (isReading && readsInFlight === 0) {
-        await showMascot($, 'working')
+      if (QUIET_TOOLS.has(e.tool) || !(await isMascotOn($))) {
+        return next(e)
+      }
+      if (e.tool === 'AskUserQuestion') {
+        await update($, asking, n => n + 1)
+        await showMascot($, 'puzzled', 'working')
+        try {
+          return await next(e)
+        } finally {
+          await update($, asking, n => Math.max(0, n - 1))
+          await showMascot($, 'working')
+        }
+      }
+      const isReading = READ_TOOLS.has(e.tool)
+      if (isReading) {
+        readsInFlight += 1
+        await showMascot($, 'reading', 'working')
+      }
+      let isFailed = true
+      try {
+        const result = await next(e)
+        isFailed = result.deny !== undefined || result.isError === true
+        return result
+      } finally {
+        if (isReading) {
+          readsInFlight = Math.max(0, readsInFlight - 1)
+        }
+        if (isFailed) {
+          await showMascot($, 'error', readsInFlight > 0 ? 'reading' : 'working')
+        } else if (isReading && readsInFlight === 0) {
+          await showMascot($, 'working')
+        }
+      }
+    } finally {
+      // While the Worktrees pane is open, a tool that can change files reads it again shortly after.
+      if (CHANGING_TOOLS.has(e.tool) && (await read($, isWorktreesOpen))) {
+        worktreesSoon($)
       }
     }
   })

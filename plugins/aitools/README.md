@@ -69,8 +69,8 @@ desktop only.
 files, next step), prints it in the chat as formatted text, and copies the raw markdown to the clipboard. Paste it into a new session to
 continue there. The brief is a command output row, so the current session's model reads it too.
 
-The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Task View** and
-**Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
+The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Subagents**, **Worktrees**, **Task View**
+and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
 
@@ -186,6 +186,66 @@ reads `Subagents (not shown)`) the team does not apply.
 - A workflow's agents are told apart from the engine's own background forks (compaction, memory) only by whether a
   workflow has been started this session; after one, such a fork may briefly show as one of its agents.
 - The pane itself starts closed in a new session.
+
+## Worktrees
+
+**Worktrees** in the **🛠** menu opens the Worktrees pane; the pane's own close mark closes it. `/worktrees` opens it,
+or closes it if open. It stays open until you close it, and comes back after the mod reloads.
+
+On the desktop, Clawd stands left of the pane's header, snipping a stray branch off a tree. He sweeps with a broom
+while worktrees are being removed, and naps under the tree, he and it in grey, when the project has no worktrees
+besides the main checkout. The terminal has no picture.
+
+```
+4 worktrees · 2 to clean · 1 with changes · 1 unpushed
+Clean removes 2 merged worktrees with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.
+
+Clean worktrees
+
+● main · 2 changed files · main checkout · this session        5h    +34  −11  –
+● feat/worktrees-pane · 3 changed files · PR #1               12m   +612  −48  ●  ×
+○ challenge-view-display-fields · merged · PR #168             6h     +0   −0  ✓  ×
+↑ feat/totem-sizes · 2 unpushed commits                        2d    +96 −210  ×  ×
+```
+
+The header counts the worktrees besides the main checkout, then the ones Clean would remove, the ones with changes and
+the ones with unpushed commits. Under it, a line says what **Clean worktrees** would do, or what the last removal did.
+
+Each row is one worktree: the main checkout always first, then the one this session runs in, then the rest by last
+commit.
+
+- **The mark**: a blue ● the worktree this session is in, a yellow ● uncommitted changes, a yellow ↑ commits not
+  pushed, ○ anything else.
+- **The name**: its branch, or its folder for a detached worktree (the desktop app makes those). After it, in dim
+  grey, what it holds that Clean would keep (changed files, unpushed or unmerged commits), or `merged`, then its pull
+  request and what it is (`main checkout`, `this session`, `detached`, `locked`, `folder missing`). The name and
+  these words take at most 50 characters together, the most telling words first; a merged worktree's name is dim too.
+- **On the right**, in columns that line up on every row: how long since its last commit (`12m`, `5h`, `2d`), lines
+  added and removed since it left the base branch (uncommitted work included), CI, and ×.
+- **CI**: ✓ passed, × failed, ● still running, – none found. It is its pull request's checks at its commit, else the
+  GitHub Actions runs at its commit.
+- **×** asks on a line under the row, `Delete feat/x and its branch?` with **Yes** and **No**, and says what would be
+  lost (`This loses 3 uncommitted files and 2 unpushed commits.`). A merged worktree's remote branch is deleted too; an
+  unmerged one's is kept, since it may hold the only copy of its commits. Pressing × again takes the question back.
+  The main checkout, the worktree this session is in and locked worktrees have no ×.
+
+**Clean worktrees** asks `Remove 2 worktrees and their branches?` with **Yes** and **No**, then removes each worktree
+that has nothing uncommitted (untracked files included) and nothing unmerged, with its local branch and its remote
+branch. It is faint and does nothing when no worktree qualifies.
+
+- A worktree counts as merged when the base branch has all its commits, or its pull request merged at its current
+  commit (a squash merge). A detached worktree's pull request is found by its commit.
+- The base branch is origin's default branch (`origin/main`), else `origin/main` or `origin/master`, else a local
+  `main` or `master`.
+- The main checkout, the worktree this session is in and locked worktrees are never removed. The rows are read again
+  just before removing, and git itself refuses a worktree with changes, since Clean never forces.
+- Git never prompts: a push that needs a password fails, and the pane says so.
+- A worktree with no commits and no changes of its own counts as merged, so Clean removes it, even one another session
+  has just made and not touched yet.
+
+The pane only reads git while it is open: when it opens, every 10 seconds, and a moment after a tool that can change
+files (Bash, Edit, Write, a subagent). GitHub (pull requests and CI, through the `gh` command) is read when it opens
+and every minute. Without `gh`, or signed out, CI shows – and the rest works. Closed, it reads nothing.
 
 ## How thread cost % is estimated
 

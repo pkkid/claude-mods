@@ -113,6 +113,59 @@ export type MonthTotal = {
   hours?: Record<string, number>
 }
 
+/** A worktree's CI at its commit: passed, failed, still running, or none found. */
+export type CiState = 'pass' | 'fail' | 'running' | 'none'
+
+/** A worktree branch's pull request on GitHub. */
+export type WorktreePr = { number: number; url: string; state: 'open' | 'merged' | 'closed' }
+
+/** One row of the Worktrees pane: what git and GitHub say of a worktree. */
+export type Worktree = {
+  path: string
+  /** Null for a detached HEAD. */
+  branch: string | null
+  head: string
+  /** The repository's main working tree: never removed. */
+  isMain: boolean
+  /** The worktree this session runs in: never removed. */
+  isCurrent: boolean
+  isLocked: boolean
+  /** Its folder is gone; git still lists it until pruned. */
+  isMissing: boolean
+  /** Lines added and removed since it left the base branch, uncommitted work included. */
+  added: number
+  removed: number
+  /** Changed, staged and untracked files. */
+  changedFiles: number
+  /** Commits on it the base branch lacks. */
+  ahead: number
+  /** Commits its remote branch lacks: all of `ahead` with no remote branch. */
+  unpushed: number
+  /** Nothing on it the base branch lacks, or its pull request merged at its commit. */
+  isMerged: boolean
+  /** The remote branch it tracks, while that exists. */
+  remote: { name: string; branch: string } | null
+  /** Its last commit (epoch ms). */
+  committedAt: number | null
+  pr: WorktreePr | null
+  ci: CiState
+}
+
+/** The Worktrees pane's rows, read while it is open; `base` is the branch merges are measured against. */
+export type WorktreeList =
+  | { status: 'loading' }
+  | { status: 'error'; text: string }
+  | { status: 'ready'; base: string; worktrees: Worktree[] }
+
+/** What a press in the Worktrees pane is about: Clean worktrees, or one row's delete. */
+export type WorktreeTarget = { kind: 'clean' } | { kind: 'delete'; path: string }
+
+/** A question the pane is asking, the removal under way, or what the last one did; null when none. */
+export type WorktreeAction =
+  | { step: 'ask' | 'busy'; target: WorktreeTarget }
+  | { step: 'done'; text: string; isError: boolean }
+  | null
+
 declare module 'claude-code' {
   interface PluginState {
     aitools: {
@@ -166,6 +219,12 @@ declare module 'claude-code' {
       asking: number
       /** Whether Claude's last reply ended by asking something; cleared by the person's next prompt. */
       isQuestionOpen: boolean
+      /** Whether the Worktrees pane is open, so a reload opens it again; git is only read while it is. */
+      isWorktreesOpen: boolean
+      /** The pane's rows; null until it first opens. */
+      worktrees: WorktreeList | null
+      /** The pane's question, removal under way, or last result. */
+      worktreeAction: WorktreeAction
     }
   }
 }
