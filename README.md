@@ -38,6 +38,9 @@ are a handy way to see which conversations are expensive.
 on or off; the choices are saved. Anything switched off also stops doing work in the background. In the terminal the
 two buttons read `tools` and `opts`.
 
+When Claude's last answer asks you something in plain text instead of pop-up choices, a **?** button appears to the
+left of **🛠**. Pressing it runs `/askme`.
+
 ![The tools row and the display options](docs/images/menus.svg)
 
 ### Task View and Clean View

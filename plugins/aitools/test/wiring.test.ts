@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine, MockClock } from 'claude-code/testing'
 import { SUBAGENT_NOTE } from '../src/agentdock'
+import { askmeText } from '../src/askme'
 
 const NOW = new Date(2026, 9, 4, 12, 0).getTime()
 
@@ -220,16 +221,100 @@ describe('wiring', () => {
     expect(writes).toEqual([])
   })
 
+  describe('the ? button', () => {
+    /** Records each prompt the mod submits, answering it as core would. */
+    function sends(on: On) {
+      const sent: { text: string; asUser?: true }[] = []
+      on('prompt.submit', (_, e) => {
+        if (e.origin.kind === 'plugin') sent.push({ text: e.text, asUser: e.origin.asUser })
+        return { text: e.text }
+      })
+      return sent
+    }
+    const asked = { ...complete('t1'), answer: 'The bar is in. Should the ? sit left of tools?' }
+
+    test('a reply that asks shows it left of tools; pressed, it sends the /askme prompt as the person and goes', async ($, on) => {
+      const sent = sends(on)
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      expect(await ui.find({ key: 'askme' })).toBeUndefined()
+      await $.turn.complete(asked)
+      const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
+      expect(keys.slice(keys.indexOf('askme'), keys.indexOf('askme') + 3)).toEqual(['askme', 'tools', 'settings'])
+      expect((await ui.find({ key: 'askme' }))?.text).toBe('?')
+      await ui.press({ key: 'askme' })
+      expect(sent).toEqual([{ text: askmeText(''), asUser: true }])
+      expect(await ui.find({ key: 'askme' })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test('not after a pop-up in the same request, nor for a reply that asks nothing, nor once the person replies', async ($, on) => {
+      on('tool.call', { tool: 'AskUserQuestion' }, () => ({ result: 'Picked blue' }))
+      sends(on)
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      await $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never)
+      await $.turn.complete(asked)
+      expect(await ui.find({ key: 'askme' })).toBeUndefined()
+      await $.prompt.submit({ text: 'Next', wait: false, origin: { kind: 'composer' } })
+      await $.turn.complete({ ...complete('t2'), answer: 'Done.' })
+      expect(await ui.find({ key: 'askme' })).toBeUndefined()
+      await $.turn.complete(asked)
+      expect(await ui.find({ key: 'askme' })).toBeDefined()
+      await $.prompt.submit({ text: 'Left of it', wait: false, origin: { kind: 'composer' } })
+      expect(await ui.find({ key: 'askme' })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test('while a turn runs it puts /askme in the prompt box, ahead of the draft', async ($, on) => {
+      const sent = sends(on)
+      const fills: string[] = []
+      on('prompt.read', () => ({ value: { text: 'only the first one', cursor: 0 } }))
+      on('prompt.fill', (_, e) => {
+        fills.push(e.text)
+        return { isFilled: true }
+      })
+      await start($, on, { usd: 0 })
+      await $.turn.complete(asked)
+      const ui = await $.ui.mount({ ...band(), props: { ...band().props, isWorking: true } })
+      await ui.press({ key: 'askme' })
+      expect(sent).toEqual([])
+      expect(fills).toEqual(['/askme only the first one'])
+      await ui.unmount()
+    })
+
+    test('a prompt that cannot be sent goes in the box instead', async ($, on) => {
+      const fills: string[] = []
+      on('prompt.submit', () => ({ drop: 'busy' }))
+      on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+      on('prompt.fill', (_, e) => {
+        fills.push(e.text)
+        return { isFilled: true }
+      })
+      await start($, on, { usd: 0 })
+      await $.turn.complete(asked)
+      const ui = await $.ui.mount(band())
+      await ui.press({ key: 'askme' })
+      expect(fills).toEqual(['/askme'])
+      await ui.unmount()
+    })
+
+    test('a session that loads on an unanswered question shows it', async ($, on) => {
+      await start($, on, { usd: 0 }, {}, [
+        { role: 'user', text: 'Add the button', toolUses: [] },
+        { role: 'assistant', text: 'Which side of tools?', toolUses: [] },
+      ])
+      const ui = await $.ui.mount(band())
+      expect(await ui.find({ key: 'askme' })).toBeDefined()
+      await ui.unmount()
+    })
+  })
+
   test('/askme sends the ask-with-choices prompt as the person, with the note after it', async ($, on) => {
     const sent: { text: string; asUser?: true }[] = []
     on('prompt.submit', (_, e) => {
       sent.push({ text: e.text, asUser: e.origin?.kind === 'plugin' ? e.origin.asUser : undefined })
       return { text: e.text }
-    })
-    const toasts: string[] = []
-    on('ui.toast', (_, e) => {
-      toasts.push(e.text)
-      return { value: undefined }
     })
     await start($, on, { usd: 0 })
     const result = await $.command.run({
@@ -241,7 +326,6 @@ describe('wiring', () => {
     expect(result.text).toBeUndefined()
     expect(sent).toEqual([])
     await clock.advance(0)
-    expect(toasts).toEqual([])
     expect(sent).toHaveLength(1)
     expect(sent[0]?.text).toContain('AskUserQuestion')
     expect(sent[0]?.text.endsWith('Also: skip the naming one')).toBe(true)

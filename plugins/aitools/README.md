@@ -82,6 +82,13 @@ what picking it means. Yes-or-no confirmations come four to a question, and you 
 under "Other". Anything typed after the command is passed along as a note, as in `/askme only the M2 ones`.
 After you answer, Claude sums up the decisions and carries on.
 
+You don't have to type the command: when Claude's last answer asks you something and it hasn't already used the
+pop-up for that request, a **?** button appears just left of **🛠** (`tools` in the terminal). It goes away once
+you send your next prompt. Pressing it sends `/askme` straight away. If it can't, because Claude is still working
+or the prompt was refused, it puts `/askme` in the prompt box for you to send. Anything you had typed there stays,
+after the command, and goes along as its note. Only a question mark right after a word counts: a bare **?**, or one
+inside code or a link, doesn't.
+
 ## Notes
 
 **Notes** in the **🛠** menu opens a **Notes** pane with one text box for a single scratch note. It is kept in

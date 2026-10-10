@@ -219,6 +219,8 @@ declare module 'claude-code' {
       asking: number
       /** Whether Claude's last reply ended by asking something; cleared by the person's next prompt. */
       isQuestionOpen: boolean
+      /** Whether Claude's last reply asks something it never put as pop-up choices: the bar's ? button runs /askme. */
+      isAskable: boolean
       /** Whether the Worktrees pane is open, so a reload opens it again; git is only read while it is. */
       isWorktreesOpen: boolean
       /** The pane's rows; null until it first opens. */

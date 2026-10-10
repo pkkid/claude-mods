@@ -209,12 +209,15 @@ export function renderBar(
     isHandingOff: boolean
     isToolsOpen: boolean
     isSettingsOpen: boolean
+    /** Whether Claude's last reply asks something it never put to the person as pop-up choices. */
+    isAskable: boolean
     viewMode: ViewMode
     /** The mascot's drawing as it stands now. */
     mascot: { source: string; alt: string } | null
   },
   on: {
     toggleTools(): void
+    askme(): void
     handoff(): void
     openNotes(): void
     setView(mode: ViewMode): void
@@ -261,6 +264,7 @@ export function renderBar(
         ))}
       </Box>
       <Box flexDirection="row" gap={gap} flexShrink={0}>
+        {flags.isAskable && <Button key="askme" label="?" {...QUIET} onPress={() => on.askme()} />}
         <Button key="tools" label={labels.tools} {...QUIET} onPress={() => on.toggleTools()} />
         <Button key="settings" label={labels.settings} {...QUIET} onPress={() => on.toggleSettings()} />
       </Box>

@@ -43,7 +43,7 @@ import {
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
-import { askmeText } from '../src/askme'
+import { ASK_TOOL, askmeText, asksQuestions, isAskableIn } from '../src/askme'
 import {
   MASCOT_START,
   ONE_SHOT_MS,
@@ -114,6 +114,7 @@ const dockTick = atom({ plugin: 'aitools', key: 'dockTick' } as const, 0)
 const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
 const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
 const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as const, false)
+const isAskable = atom({ plugin: 'aitools', key: 'isAskable' } as const, false)
 const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
 const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
 const isWorktreesOpen = atom({ plugin: 'aitools', key: 'isWorktreesOpen' } as const, false)
@@ -155,6 +156,8 @@ let workflowAgents = 0
 let readsInFlight = 0
 /** Whether a main-chat turn is running: where the mascot stands when he is turned on mid-session. */
 let isTurnRunning = false
+/** Whether Claude has opened the question pop-up since the person's last prompt: then the bar offers no ? button. */
+let isAskedThisRequest = false
 /** The once-a-second timer that redraws helper times: running only while the Subagents pane is open. */
 let dockTimer: Timer | null = null
 /** The model tools registered so far: each is offered to the model only once its feature is first turned on. */
@@ -843,6 +846,26 @@ function drawMascot(state: MascotState): ReturnType<typeof mascotDrawing> {
   return lastMascot.drawing
 }
 
+/**
+ * The bar's ? button: /askme's prompt sent as the person's, or, while a turn runs or when the prompt cannot be sent,
+ * `/askme` put in the prompt box ahead of any draft (which then rides along as its note) to send by hand. When the box
+ * cannot take it either, the button stays.
+ */
+async function askFromBar($: EngineInterface, isWorking: boolean): Promise<void> {
+  await update($, isAskable, () => false)
+  if (!isWorking) {
+    const sent = await $.prompt.submit({ text: askmeText(''), asUser: true }).catch(() => null)
+    if (sent !== null && sent.drop === undefined) {
+      return
+    }
+  }
+  const draft = (await $.prompt.read()).text.trim()
+  const filled = await $.prompt.fill({ text: draft === '' ? '/askme' : `/askme ${draft}` }).catch(() => null)
+  if (!filled?.isFilled) {
+    await update($, isAskable, () => true)
+  }
+}
+
 /** The bar, with the 🛠 or ⁝ menu above it while one is open, for the AbovePrompt band. */
 async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], isWorking: boolean) {
   await read($, tick)
@@ -861,6 +884,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isHandingOff: await read($, isHandingOff),
     isToolsOpen: await read($, isToolsOpen),
     isSettingsOpen: await read($, isSettingsOpen),
+    isAskable: await read($, isAskable),
     viewMode: await read($, viewMode),
     // Read only where it is drawn and turned on, so no other bar redraws for the mascot.
     mascot: el.Svg && current.mascot ? drawMascot(await read($, mascot)) : null,
@@ -872,6 +896,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
 
   return renderBar(el, view, flags, {
     toggleTools: () => void toggleMenu($, 'tools'),
+    askme: () => void askFromBar($, isWorking),
     handoff: () => void showHandoff($),
     openNotes: () => void openNotes($),
     toggleSettings: () => void toggleMenu($, 'settings'),
@@ -1199,8 +1224,10 @@ export const register: Register = on => {
     // A load (a reload at a turn's end, a restart) sees no turn.complete for what came before: read it back, for
     // what is on.
     await startView($, view)
+    const rows = await $.session.messages().catch(() => [])
+    await update($, isAskable, () => isAskableIn(rows))
     if (await isMascotOn($)) {
-      const isAsked = isQuestionOpenIn(await $.session.messages().catch(() => []))
+      const isAsked = isQuestionOpenIn(rows)
       await update($, isQuestionOpen, () => isAsked)
       // A new session starts the mascot waving. A reload keeps his pose, but its timers went with the old module: a
       // moment pose gives way now and a transition still playing is dropped.
@@ -1326,6 +1353,8 @@ export const register: Register = on => {
       return next(e)
     }
     isTurnRunning = false
+    const isAsking = e.reason === 'answer' && !isAskedThisRequest && asksQuestions(e.answer)
+    await update($, isAskable, () => isAsking)
     if ((await read($, viewMode)) === 'clean') {
       await update($, finals, list => addFinal(list, e.answer))
     }
@@ -1382,7 +1411,7 @@ export const register: Register = on => {
   on('command.run', { command: 'askme' }, ($, e) => {
     const text = askmeText(e.args)
     $.clock.after(0, () => {
-      $.prompt.submit({ text, asUser: true }).catch(err => $.ui.toast(`/askme failed: ${errorText(err)}`))
+      $.prompt.submit({ text, asUser: true }).catch(() => undefined)
     })
     return {}
   })
@@ -1414,6 +1443,8 @@ export const register: Register = on => {
     if (PERSON_ORIGINS.has(e.origin.kind)) {
       await update($, checklist, () => null)
       await update($, isQuestionOpen, () => false)
+      await update($, isAskable, () => false)
+      isAskedThisRequest = false
       // Where the pane's Current task agents start.
       if (await read($, isDockOpen)) {
         const at = await $.clock.now()
@@ -1665,6 +1696,16 @@ export const register: Register = on => {
         worktreesSoon($)
       }
     }
+  })
+
+  // Questions put as pop-up choices need no ? button for the rest of the request.
+  on('tool.call', { tool: ASK_TOOL }, async ($, e, next) => {
+    if (e.agentId === undefined) {
+      isAskedThisRequest = true
+      await update($, isAskable, () => false)
+    }
+
+    return next(e)
   })
 
   // Answered here without `next`: the call never reaches a permission dialog, and nothing runs but this.
