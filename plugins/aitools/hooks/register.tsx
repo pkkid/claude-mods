@@ -43,6 +43,7 @@ import {
 import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
+import { askmeText } from '../src/askme'
 import {
   MASCOT_START,
   ONE_SHOT_MS,
@@ -1246,6 +1247,11 @@ export const register: Register = on => {
       await setWorktreesOpen($, true)
     }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
+    await $.command.register({
+      name: 'askme',
+      description: 'Ask the questions from the last answer as pop-up choices with a recommendation',
+      argumentHint: '[note]',
+    })
     startScan($)
 
     return next(e)
@@ -1370,6 +1376,16 @@ export const register: Register = on => {
 
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))
+
+  // A command may not submit a prompt while it runs (the prompt would wait on the command), so a timer sends it just
+  // after; it then runs as the next turn.
+  on('command.run', { command: 'askme' }, ($, e) => {
+    const text = askmeText(e.args)
+    $.clock.after(0, () => {
+      $.prompt.submit({ text, asUser: true }).catch(err => $.ui.toast(`/askme failed: ${errorText(err)}`))
+    })
+    return {}
+  })
 
   on('ui.render', { component: 'Pane', requestId: HANDOFF_PANE }, async ($, e) => {
     const { Box, Text, Button, Markdown } = $.ui.resolve(e)

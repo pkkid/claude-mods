@@ -88,6 +88,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 |---|---|
 | `/aitools` | Hide or show the whole bar (`/aitools on`, `/aitools off`) |
 | `/handoff` | Write a handoff brief into the chat and copy it |
+| `/askme` | Ask the questions from Claude's last answer again as pop-up choices, with a recommendation first |
 | `/taskview`, `/cleanview` | Turn Task View or Clean View on or off |
 | `/subagents` | Open or close the Subagents pane |
 | `/worktrees` | Open or close the Worktrees pane |
