@@ -74,6 +74,14 @@ and **Clean View**, right-aligned; press it again to close the row without picki
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
 
+## Ask as choices
+
+When Claude ends an answer with questions for you in plain text, `/askme` asks them again as pop-up questions
+with clickable options. Claude's recommended option comes first, marked "(Recommended)", and each option says
+what picking it means. Yes-or-no confirmations come four to a question, and you can always type your own answer
+under "Other". Anything typed after the command is passed along as a note, as in `/askme only the M2 ones`.
+After you answer, Claude sums up the decisions and carries on.
+
 ## Notes
 
 **Notes** in the **🛠** menu opens a **Notes** pane with one text box for a single scratch note. It is kept in

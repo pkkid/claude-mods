@@ -220,6 +220,34 @@ describe('wiring', () => {
     expect(writes).toEqual([])
   })
 
+  test('/askme sends the ask-with-choices prompt as the person, with the note after it', async ($, on) => {
+    const sent: { text: string; asUser?: true }[] = []
+    on('prompt.submit', (_, e) => {
+      sent.push({ text: e.text, asUser: e.origin?.kind === 'plugin' ? e.origin.asUser : undefined })
+      return { text: e.text }
+    })
+    const toasts: string[] = []
+    on('ui.toast', (_, e) => {
+      toasts.push(e.text)
+      return { value: undefined }
+    })
+    await start($, on, { usd: 0 })
+    const result = await $.command.run({
+      command: 'askme',
+      args: 'skip the naming one',
+      origin: { kind: 'composer' },
+      presentation: { isFullscreen: false, columns: 100 },
+    })
+    expect(result.text).toBeUndefined()
+    expect(sent).toEqual([])
+    await clock.advance(0)
+    expect(toasts).toEqual([])
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.text).toContain('AskUserQuestion')
+    expect(sent[0]?.text.endsWith('Also: skip the naming one')).toBe(true)
+    expect(sent[0]?.asUser).toBe(true)
+  })
+
   test("the tools menu's Handoff shows the brief in a pane with a Copy button, copying nothing by itself", async ($, on) => {
     const brief = '## Goal\nShip aitools\n\n## Next step\nMerge'
     const copies: string[] = []
