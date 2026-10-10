@@ -136,9 +136,9 @@ describe('worktrees: what Clean removes', () => {
 
   test('the header and Clean line count what is cleaned and what stays', () => {
     const rows = [tree({ isMain: true, branch: 'main' }), tree(), tree({ changedFiles: 2 }), tree({ ahead: 1 })]
-    expect(headerText(rows)).toBe('3 worktrees · 1 to clean · 1 with changes · 1 unpushed')
-    expect(cleanText(rows, 'origin/main')).toBe('Clean removes 1 merged worktree with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.')
-    expect(cleanText([rows[0]!, rows[2]!], 'origin/main')).toBe('Nothing to clean: each worktree has changes, commits not on main, or is in use.')
+    expect(headerText(rows)).toBe('3 worktrees · 1 to prune · 1 with changes · 1 unpushed')
+    expect(cleanText(rows, 'origin/main')).toBe('Prune removes 1 merged worktree with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.')
+    expect(cleanText([rows[0]!, rows[2]!], 'origin/main')).toBe('Nothing to prune: each worktree has changes, commits not on main, or is in use.')
     expect(cleanText([rows[0]!], 'origin/main')).toBe('No worktrees besides the main checkout.')
   })
 

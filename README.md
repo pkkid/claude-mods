@@ -71,7 +71,7 @@ Worktrees from finished sessions pile up. The **Worktrees** pane lists every wor
 first, each with what it still holds (changed files, unpushed commits, merged, its pull request), how old it is, lines
 added and removed, whether CI passed, and a × to delete it.
 
-**Clean worktrees** removes every worktree that is merged and has nothing uncommitted, with its local and remote
+**Prune worktrees** removes every worktree that is merged and has nothing uncommitted, with its local and remote
 branch, after asking first. Anything with work in it stays. Clawd prunes a tree beside the list, sweeps up while
 worktrees are removed, and naps when there are none. The pane only reads git while it is open.
 

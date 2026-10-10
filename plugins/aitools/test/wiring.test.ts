@@ -1573,7 +1573,7 @@ describe('wiring', () => {
       expect(repo.calls).toContain('git worktree list --porcelain')
       expect(repo.calls.some(c => c.startsWith('gh pr list'))).toBe(true)
       const text = await paneText($)
-      expect(text).toContain('3 worktrees · 1 to clean · 1 with changes · 1 unpushed')
+      expect(text).toContain('3 worktrees · 1 to prune · 1 with changes · 1 unpushed')
       expect(text).toContain('feat/dirty · 2 changed files')
       expect(text).toContain('+10−3')
       expect(text).toContain('✓')

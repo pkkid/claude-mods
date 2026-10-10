@@ -224,7 +224,7 @@ export function sortWorktrees(list: readonly Worktree[]): Worktree[] {
 }
 
 /**
- * Whether Clean removes it: not the main checkout or the one this session is in, not locked, nothing uncommitted and
+ * Whether Prune removes it: not the main checkout or the one this session is in, not locked, nothing uncommitted and
  * nothing unmerged. A detached worktree counts too: it has only its folder to remove.
  */
 export function isCleanable(w: Worktree): boolean {
@@ -244,7 +244,7 @@ export function worktreeName(w: Pick<Worktree, 'branch' | 'path'>): string {
 }
 
 /**
- * The faint words after a row's name, most telling first, so a cut row still says them: what it holds that Clean
+ * The faint words after a row's name, most telling first, so a cut row still says them: what it holds that Prune
  * would keep (or that it is merged), then its pull request, then what it is.
  */
 export function noteParts(w: Worktree): string[] {
@@ -323,7 +323,7 @@ export function headerText(list: readonly Worktree[]): string {
   const others = list.filter(w => !w.isMain)
   const parts = [plural(others.length, 'worktree')]
   const counts: [number, string][] = [
-    [others.filter(isCleanable).length, 'to clean'],
+    [others.filter(isCleanable).length, 'to prune'],
     [others.filter(w => w.changedFiles > 0).length, 'with changes'],
     [others.filter(w => w.unpushed > 0 && !w.isMerged).length, 'unpushed'],
   ]
@@ -334,7 +334,7 @@ export function headerText(list: readonly Worktree[]): string {
   return parts.join(' · ')
 }
 
-/** What Clean would do, said before it is pressed. */
+/** What Prune would do, said before it is pressed. */
 export function cleanText(list: readonly Worktree[], base: string): string {
   const others = list.filter(w => !w.isMain)
   if (others.length === 0) {
@@ -343,11 +343,11 @@ export function cleanText(list: readonly Worktree[], base: string): string {
   const n = others.filter(isCleanable).length
   const kept = others.length - n
   if (n === 0) {
-    return `Nothing to clean: each worktree has changes, commits not on ${baseName(base)}, or is in use.`
+    return `Nothing to prune: each worktree has changes, commits not on ${baseName(base)}, or is in use.`
   }
   const keeps = kept > 0 ? ` ${plural(kept, 'worktree')} with changes, unmerged commits or in use stay.` : ''
 
-  return `Clean removes ${plural(n, 'merged worktree')} with their local and remote branches.${keeps}`
+  return `Prune removes ${plural(n, 'merged worktree')} with their local and remote branches.${keeps}`
 }
 
 /** What deleting one row asks first, and what it would lose. */
@@ -386,7 +386,7 @@ const sameTarget = (a: WorktreeTarget, b: WorktreeTarget) =>
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] }
 
 /**
- * The Worktrees pane: the header, what Clean would do (or what it did), a blank line and Clean worktrees (or its
+ * The Worktrees pane: the header, what Prune would do (or what it did), a blank line and Prune worktrees (or its
  * question), then a row per worktree. Where SVG is drawn, Clawd stands left of the controls.
  */
 export function renderWorktrees(
@@ -438,14 +438,14 @@ export function renderWorktrees(
   )
 }
 
-/** Clean worktrees, its question once pressed, or what it is doing, a blank line above; faint and unpressable with nothing to clean. */
+/** Prune worktrees, its question once pressed, or what it is doing, a blank line above; faint and unpressable with nothing to prune. */
 function renderClean(el: El, rows: readonly Worktree[], action: WorktreeAction, on: { ask(target: WorktreeTarget): void; confirm(): void; cancel(): void }) {
   const { Box, Text, Button } = el
   const n = rows.filter(isCleanable).length
   if (action?.step === 'busy') {
     return (
       <Box key="clean" marginTop={1}>
-        <Text dimColor>{action.target.kind === 'clean' ? 'Cleaning worktrees…' : 'Deleting…'}</Text>
+        <Text dimColor>{action.target.kind === 'clean' ? 'Pruning worktrees…' : 'Deleting…'}</Text>
       </Box>
     )
   }
@@ -462,9 +462,9 @@ function renderClean(el: El, rows: readonly Worktree[], action: WorktreeAction, 
   return (
     <Box key="clean" flexDirection="row" marginTop={1}>
       {n === 0 ? (
-        <Text color={FAINT_TEXT}>Clean worktrees</Text>
+        <Text color={FAINT_TEXT}>Prune worktrees</Text>
       ) : (
-        <Button key="clean" label="Clean worktrees" plain dimColor={false} onPress={() => on.ask({ kind: 'clean' })} />
+        <Button key="clean" label="Prune worktrees" plain dimColor={false} onPress={() => on.ask({ kind: 'clean' })} />
       )}
     </Box>
   )

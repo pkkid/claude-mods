@@ -212,10 +212,10 @@ while worktrees are being removed, and naps under the tree, he and it in grey, w
 besides the main checkout. The terminal has no picture.
 
 ```
-4 worktrees · 2 to clean · 1 with changes · 1 unpushed
-Clean removes 2 merged worktrees with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.
+4 worktrees · 2 to prune · 1 with changes · 1 unpushed
+Prune removes 2 merged worktrees with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.
 
-Clean worktrees
+Prune worktrees
 
 ● main · 2 changed files · main checkout · this session        5h    +34  −11  –
 ● feat/worktrees-pane · 3 changed files · PR #1               12m   +612  −48  ●  ×
@@ -223,8 +223,8 @@ Clean worktrees
 ↑ feat/totem-sizes · 2 unpushed commits                        2d    +96 −210  ×  ×
 ```
 
-The header counts the worktrees besides the main checkout, then the ones Clean would remove, the ones with changes and
-the ones with unpushed commits. Under it, a line says what **Clean worktrees** would do, or what the last removal did.
+The header counts the worktrees besides the main checkout, then the ones Prune would remove, the ones with changes and
+the ones with unpushed commits. Under it, a line says what **Prune worktrees** would do, or what the last removal did.
 
 Each row is one worktree: the main checkout always first, then the one this session runs in, then the rest by last
 commit.
@@ -232,7 +232,7 @@ commit.
 - **The mark**: a blue ● the worktree this session is in, a yellow ● uncommitted changes, a yellow ↑ commits not
   pushed, ○ anything else.
 - **The name**: its branch, or its folder for a detached worktree (the desktop app makes those). After it, in dim
-  grey, what it holds that Clean would keep (changed files, unpushed or unmerged commits), or `merged`, then its pull
+  grey, what it holds that Prune would keep (changed files, unpushed or unmerged commits), or `merged`, then its pull
   request and what it is (`main checkout`, `this session`, `detached`, `locked`, `folder missing`). The name and
   these words take at most 50 characters together, the most telling words first; a merged worktree's name is dim too.
 - **On the right**, in columns that line up on every row: how long since its last commit (`12m`, `5h`, `2d`), lines
@@ -244,7 +244,7 @@ commit.
   unmerged one's is kept, since it may hold the only copy of its commits. Pressing × again takes the question back.
   The main checkout, the worktree this session is in and locked worktrees have no ×.
 
-**Clean worktrees** asks `Remove 2 worktrees and their branches?` with **Yes** and **No**, then removes each worktree
+**Prune worktrees** asks `Remove 2 worktrees and their branches?` with **Yes** and **No**, then removes each worktree
 that has nothing uncommitted (untracked files included) and nothing unmerged, with its local branch and its remote
 branch. It is faint and does nothing when no worktree qualifies.
 
@@ -253,9 +253,9 @@ branch. It is faint and does nothing when no worktree qualifies.
 - The base branch is origin's default branch (`origin/main`), else `origin/main` or `origin/master`, else a local
   `main` or `master`.
 - The main checkout, the worktree this session is in and locked worktrees are never removed. The rows are read again
-  just before removing, and git itself refuses a worktree with changes, since Clean never forces.
+  just before removing, and git itself refuses a worktree with changes, since Prune never forces.
 - Git never prompts: a push that needs a password fails, and the pane says so.
-- A worktree with no commits and no changes of its own counts as merged, so Clean removes it, even one another session
+- A worktree with no commits and no changes of its own counts as merged, so Prune removes it, even one another session
   has just made and not touched yet.
 
 The pane only reads git while it is open: when it opens, every 10 seconds, and a moment after a tool that can change
