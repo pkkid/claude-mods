@@ -107,14 +107,14 @@ describe('every subagent', () => {
     expect(run.cards.map(c => c.doing)).toEqual([undefined, 'Reading b'])
   })
 
-  test("a line's name and activity are cut to 80 characters together, the name first", () => {
+  test("a line's name and activity are cut to 65 characters together, the name first", () => {
     expect(clipLine('Survey', 'Reading bar.tsx')).toEqual({ task: 'Survey', doing: 'Reading bar.tsx' })
     const line = clipLine('n'.repeat(30), 'd'.repeat(60))
-    expect(line).toEqual({ task: 'n'.repeat(30), doing: `${'d'.repeat(46)}…` })
-    expect(`${line.task} · ${line.doing}`).toHaveLength(80)
-    expect(clipLine('n'.repeat(90), 'Reading a')).toEqual({ task: `${'n'.repeat(79)}…` })
-    expect(clipLine('n'.repeat(68), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(68) })
-    expect(clipLine('n'.repeat(67), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(67), doing: 'Reading b…' })
+    expect(line).toEqual({ task: 'n'.repeat(30), doing: `${'d'.repeat(31)}…` })
+    expect(`${line.task} · ${line.doing}`).toHaveLength(65)
+    expect(clipLine('n'.repeat(90), 'Reading a')).toEqual({ task: `${'n'.repeat(64)}…` })
+    expect(clipLine('n'.repeat(53), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(53) })
+    expect(clipLine('n'.repeat(52), 'Reading bar.tsx')).toEqual({ task: 'n'.repeat(52), doing: 'Reading b…' })
   })
 
   test('running lines come first, oldest on top; finished ones follow, the latest first', () => {

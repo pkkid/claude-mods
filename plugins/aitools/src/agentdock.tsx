@@ -173,7 +173,7 @@ export function workflowName(input: Record<string, unknown>): string {
 }
 
 /** The most characters a line's name and activity take together, ` · ` included. */
-export const LINE_MAX = 80
+export const LINE_MAX = 65
 /** The fewest characters worth showing of an activity; with less room it is left off. */
 const DOING_MIN = 10
 

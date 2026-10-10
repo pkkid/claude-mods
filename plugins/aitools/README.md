@@ -157,7 +157,7 @@ workflow's agents have no names of their own). The ones running come first (olde
 most recently finished first; pieces waiting for a free helper get no line, only a count in the header. Marks are Task
 View's: a blue ● running, a ✓ done, and a red × failed. A running subagent's name is a lighter grey, followed in dim grey by what it is
 doing from its latest tool call (`Reading bar.tsx`, `Running npm test`) and its running time. A line's name and
-what it is doing take at most 80 characters together, cut with `…`. A finished line is all
+what it is doing take at most 65 characters together, cut with `…`. A finished line is all
 dim (but a failed one's ×): no bar, just how long it ran and how long ago it finished, `0:09 (3m ago)`.
 
 ```
