@@ -1088,6 +1088,15 @@ function syncWorktrees($: EngineInterface, isOpen: boolean): void {
   githubRuns = new Map()
 }
 
+/** The pane's Refresh: git and GitHub read now, and the next scheduled GitHub read a full interval later. */
+async function refreshWorktreesNow($: EngineInterface): Promise<void> {
+  if ((await read($, worktreeAction))?.step === 'busy') {
+    return
+  }
+  worktreeReads = 0
+  await refreshWorktrees($, true)
+}
+
 /** Opens or closes the Worktrees pane; opening reads everything at once, GitHub included. */
 async function setWorktreesOpen($: EngineInterface, isOpen: boolean): Promise<void> {
   await update($, isWorktreesOpen, () => isOpen)
@@ -1555,6 +1564,7 @@ export const register: Register = on => {
       ask: target => void askWorktrees($, target),
       confirm: () => void confirmWorktrees($),
       cancel: () => void askWorktrees($, null),
+      refresh: () => void refreshWorktreesNow($),
     })
   })
 

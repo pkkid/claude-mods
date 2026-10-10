@@ -1588,6 +1588,31 @@ describe('wiring', () => {
       expect(repo.calls.length).toBe(closed)
     })
 
+    test('GitHub is read on open and every 5 minutes after; Refresh reads it now and restarts the wait', async ($, on) => {
+      const repo = fakeRepo(on)
+      await start($, on, { usd: 0 })
+      await run($, 'worktrees')
+      await clock.settle()
+      const prLists = () => repo.calls.filter(c => c.startsWith('gh pr list')).length
+      expect(prLists()).toBe(1)
+      await clock.advance(4 * 60_000 + 50_000)
+      expect(prLists()).toBe(1)
+      await clock.advance(10_000)
+      expect(prLists()).toBe(2)
+      await clock.advance(2 * 60_000)
+      const pane = await $.ui.mount({ plugin: 'aitools', surface: 'desktop', component: 'Pane', requestId: 'worktrees', props: { ...PANE, title: 'Worktrees' } })
+      const keys = (await pane.findAll({ type: 'Button' })).map(b => b.key)
+      expect(keys.slice(keys.indexOf('clean'), keys.indexOf('clean') + 2)).toEqual(['clean', 'refresh'])
+      await pane.press({ key: 'refresh' })
+      await clock.settle()
+      await pane.unmount()
+      expect(prLists()).toBe(3)
+      await clock.advance(4 * 60_000 + 50_000)
+      expect(prLists()).toBe(3)
+      await clock.advance(10_000)
+      expect(prLists()).toBe(4)
+    })
+
     test('a tool that changes files reads the open pane again shortly after', async ($, on) => {
       const repo = fakeRepo(on)
       await start($, on, { usd: 0 })

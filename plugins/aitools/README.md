@@ -215,7 +215,7 @@ besides the main checkout. The terminal has no picture.
 4 worktrees · 2 to prune · 1 with changes · 1 unpushed
 Prune removes 2 merged worktrees with their local and remote branches. 2 worktrees with changes, unmerged commits or in use stay.
 
-Prune worktrees
+Prune worktrees  Refresh
 
 ● main · 2 changed files · main checkout · this session        5h    +34  −11  –
 ● feat/worktrees-pane · 3 changed files · PR #1               12m   +612  −48  ●  ×
@@ -260,7 +260,9 @@ branch. It is faint and does nothing when no worktree qualifies.
 
 The pane only reads git while it is open: when it opens, every 10 seconds, and a moment after a tool that can change
 files (Bash, Edit, Write, a subagent). GitHub (pull requests and CI, through the `gh` command) is read when it opens
-and every minute. Without `gh`, or signed out, CI shows – and the rest works. Closed, it reads nothing.
+and every 5 minutes, two API calls each time, since its API limit is shared with everything else signed in as you.
+**Refresh**, right of **Prune worktrees**, reads git and GitHub now. Without `gh`, or signed out, CI shows – and the
+rest works. Closed, it reads nothing.
 
 ## How thread cost % is estimated
 

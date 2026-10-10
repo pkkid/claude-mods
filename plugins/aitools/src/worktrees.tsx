@@ -6,9 +6,12 @@ import { PRUNER_HEIGHT, PRUNER_WIDTH, prunerAlt, prunerSvg } from './pruner'
 import type { PrunerMode } from './pruner'
 
 export const WORKTREES_PANE = 'worktrees'
-/** How often the open pane reads git again, and how many of those reads go by between GitHub's (PRs and CI). */
+/**
+ * How often the open pane reads git again, and how many of those reads go by between GitHub's (PRs and CI): every
+ * 5 minutes, since GitHub's API budget is shared with everything else signed in as the person. Refresh reads it now.
+ */
 export const REFRESH_MS = 10_000
-export const GITHUB_EVERY = 6
+export const GITHUB_EVERY = 30
 /** How long after a tool that can change files the open pane reads git again: a burst of edits reads once. */
 export const AFTER_TOOL_MS = 1500
 /** How long the sweeping Clawd shows at least, so a quick clean is still seen. */
@@ -386,13 +389,13 @@ const sameTarget = (a: WorktreeTarget, b: WorktreeTarget) =>
 type El = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & { Svg?: Elements['desktop']['Svg'] }
 
 /**
- * The Worktrees pane: the header, what Prune would do (or what it did), a blank line and Prune worktrees (or its
- * question), then a row per worktree. Where SVG is drawn, Clawd stands left of the controls.
+ * The Worktrees pane: the header, what Prune would do (or what it did), a blank line and Prune worktrees with Refresh
+ * (or its question), then a row per worktree. Where SVG is drawn, Clawd stands left of the controls.
  */
 export function renderWorktrees(
   el: El,
   view: { list: WorktreeList | null; action: WorktreeAction; now: number },
-  on: { ask(target: WorktreeTarget): void; confirm(): void; cancel(): void },
+  on: { ask(target: WorktreeTarget): void; confirm(): void; cancel(): void; refresh(): void },
 ) {
   const { Box, Text, Svg } = el
   const { list, action } = view
@@ -438,8 +441,16 @@ export function renderWorktrees(
   )
 }
 
-/** Prune worktrees, its question once pressed, or what it is doing, a blank line above; faint and unpressable with nothing to prune. */
-function renderClean(el: El, rows: readonly Worktree[], action: WorktreeAction, on: { ask(target: WorktreeTarget): void; confirm(): void; cancel(): void }) {
+/**
+ * Prune worktrees (faint and unpressable with nothing to prune) and Refresh, which reads git and GitHub now; or
+ * Prune's question once pressed, or what it is doing. A blank line above.
+ */
+function renderClean(
+  el: El,
+  rows: readonly Worktree[],
+  action: WorktreeAction,
+  on: { ask(target: WorktreeTarget): void; confirm(): void; cancel(): void; refresh(): void },
+) {
   const { Box, Text, Button } = el
   const n = rows.filter(isCleanable).length
   if (action?.step === 'busy') {
@@ -460,12 +471,13 @@ function renderClean(el: El, rows: readonly Worktree[], action: WorktreeAction, 
   }
 
   return (
-    <Box key="clean" flexDirection="row" marginTop={1}>
+    <Box key="clean" flexDirection="row" columnGap={2} marginTop={1}>
       {n === 0 ? (
-        <Text color={FAINT_TEXT}>Prune worktrees</Text>
+        <Text key="clean-off" color={FAINT_TEXT}>Prune worktrees</Text>
       ) : (
         <Button key="clean" label="Prune worktrees" plain dimColor={false} onPress={() => on.ask({ kind: 'clean' })} />
       )}
+      <Button key="refresh" label="Refresh" plain dimColor onPress={() => on.refresh()} />
     </Box>
   )
 }
