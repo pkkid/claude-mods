@@ -8,6 +8,7 @@ export type ToggleKey =
   | 'threadTokens'
   | 'lastTurnTokens'
   | 'cacheWarmth'
+  | 'coldCost'
   | 'threadCost'
   | 'lastTurnCost'
   | 'threadPercent'
@@ -157,6 +158,12 @@ export type WorktreeList =
   | { status: 'error'; text: string }
   | { status: 'ready'; base: string; worktrees: Worktree[] }
 
+/** What a /keepwarm ping read and cost (priced at the chat's model; null for one with no known rates). */
+export type PingReceipt = { at: number; read: number; usd: number | null; isEstimate: boolean }
+
+/** /keepwarm's window: when it ends, and the last ping's receipt. */
+export type KeepWarm = { until: number; lastPing: PingReceipt | null }
+
 /** What a press in the Worktrees pane is about: Clean worktrees, or one row's delete. */
 export type WorktreeTarget = { kind: 'clean' } | { kind: 'delete'; path: string }
 
@@ -221,6 +228,12 @@ declare module 'claude-code' {
       isQuestionOpen: boolean
       /** Whether Claude's last reply asks something it never put as pop-up choices: the bar's ? button runs /askme. */
       isAskable: boolean
+      /** The main chat's model, as its last request sent it: what a cold cache's cost is priced at. */
+      mainModel: string | null
+      /** /keepwarm's window while it runs; null while it is off. */
+      keepWarm: KeepWarm | null
+      /** Why /keepwarm last stopped before its time (a failed or cold ping); null when it ended on time or was turned off. */
+      keepWarmStopped: string | null
       /** Whether the Worktrees pane is open, so a reload opens it again; git is only read while it is. */
       isWorktreesOpen: boolean
       /** The pane's rows; null until it first opens. */

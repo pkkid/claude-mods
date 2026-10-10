@@ -1720,4 +1720,105 @@ describe('wiring', () => {
       await pane.unmount()
     })
   })
+
+  describe('/keepwarm', () => {
+    const run = ($: Engine, args: string) =>
+      $.command.run({ command: 'keepwarm', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+    const warm = { input_tokens: 4, output_tokens: 2, cache_read_input_tokens: 62_000, cache_creation_input_tokens: 30 }
+    type Reply = { isAnswered: true; text: string; usage: typeof warm } | { isAnswered: false; reason: 'api-error'; status: number; error: string; usage: typeof warm }
+    /** Answers `$.model.fork` with `reply` (a warm read by default), recording each prompt sent. */
+    function forks(on: On, reply: () => Reply = () => ({ isAnswered: true, text: 'warm', usage: warm })) {
+      const sent: string[] = []
+      on('model.fork', (_, e) => {
+        sent.push(e.prompt)
+        return { value: reply() as never }
+      })
+      return sent
+    }
+    const status = async ($: Engine) => (await run($, 'status')).text ?? ''
+
+    test('pings five minutes before the cache lapses, again 55 minutes after, and ends on time', async ($, on) => {
+      const sent = forks(on)
+      await start($, on, { usd: 0 }, { settings: { cacheWarmth: false } })
+      await step($)
+      expect((await run($, '2h')).text).toMatch(/^Keeping the cache warm for 2h0m more, until .+\. Next ping in 55m\./)
+      await clock.advance(55 * 60_000 - 1)
+      expect(sent).toEqual([])
+      await clock.advance(1)
+      expect(sent).toEqual(['Reply with the single word: warm'])
+      expect(await status($)).toContain('Last ping read 62k tokens, $0.01.')
+      // The ping restarted the cache's hour: the next is due 55 minutes after it.
+      await clock.advance(55 * 60_000)
+      expect(sent).toHaveLength(2)
+      // Warm past the window's end now: no third ping, and the window ends at two hours.
+      await clock.advance(10 * 60_000)
+      expect(sent).toHaveLength(2)
+      expect(await status($)).toMatch(/^Keepwarm is off\. \/keepwarm/)
+    })
+
+    test('a ping that finds the cache gone stops it, and says why', async ($, on) => {
+      const sent = forks(on, () => ({ isAnswered: true, text: 'warm', usage: { ...warm, cache_read_input_tokens: 0, cache_creation_input_tokens: 62_000 } }))
+      await start($, on, { usd: 0 })
+      await step($)
+      await run($, '3h')
+      await clock.advance(55 * 60_000)
+      expect(sent).toHaveLength(1)
+      expect(await status($)).toContain('It stopped early: the ping read 0 and wrote 62k tokens, so the cache had already lapsed.')
+      await clock.advance(55 * 60_000)
+      expect(sent).toHaveLength(1)
+    })
+
+    test('a failed ping stops it too, with the reason', async ($, on) => {
+      forks(on, () => ({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: warm }))
+      await start($, on, { usd: 0 })
+      await step($)
+      await run($, '3h')
+      await clock.advance(55 * 60_000)
+      expect(await status($)).toContain('It stopped early: the API call failed (529).')
+    })
+
+    test('no ping while a turn runs; a cache that outlives keepwarm needs none', async ($, on) => {
+      const sent = forks(on)
+      await start($, on, { usd: 0 })
+      await step($)
+      await run($, '30m')
+      await clock.advance(60 * 60_000)
+      expect(sent).toEqual([])
+
+      await step($)
+      await run($, '3h')
+      await $.turn.start({ text: 'go', turnId: 't2' })
+      await clock.advance(56 * 60_000)
+      expect(sent).toEqual([])
+    })
+
+    test('a window this session saved comes back after a restart', async ($, on) => {
+      forks(on)
+      await start($, on, { usd: 0 }, { 'keepWarm:session-1': NOW + 3 * 60 * 60_000 })
+      expect(await status($)).toMatch(/^Keeping the cache warm for 3h0m more/)
+    })
+
+    test('the bar shows its marker left of tools, right of ?, until /keepwarm off', async ($, on) => {
+      forks(on)
+      on('prompt.submit', (_, e) => ({ text: e.text }))
+      await start($, on, { usd: 0 })
+      const ui = await $.ui.mount(band())
+      expect(await ui.find({ key: 'keepwarm' })).toBeUndefined()
+      await run($, '5h')
+      await $.turn.complete({ ...complete('t1'), answer: 'Which one should stay?' })
+      const order = (await ui.findAll({})).map(n => n.key).filter(k => k === 'askme' || k === 'keepwarm' || k === 'tools')
+      expect(order).toEqual(['askme', 'keepwarm', 'tools'])
+      expect(await ui.find({ text: '\u263C' })).toBeDefined()
+      expect((await run($, 'off')).text).toMatch(/^Keepwarm stopped/)
+      expect(await ui.find({ key: 'keepwarm' })).toBeUndefined()
+      await ui.unmount()
+    })
+
+    test('refuses a time it cannot read', async ($, on) => {
+      await start($, on, { usd: 0 })
+      expect((await run($, 'soon')).text).toMatch(/^Keeps the prompt cache warm/)
+      expect((await run($, 'help')).text).toContain('/keepwarm 90m')
+      expect((await run($, '')).text).toMatch(/^Keeping the cache warm for 6h0m more/)
+    })
+  })
 })

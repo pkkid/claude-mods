@@ -15,6 +15,7 @@ export const TOGGLES: readonly { key: ToggleKey; label: string; needsSvg?: true 
   { key: 'threadTokens', label: 'Thread tokens' },
   { key: 'lastTurnTokens', label: 'Last-turn tokens' },
   { key: 'cacheWarmth', label: 'Cache warmth' },
+  { key: 'coldCost', label: 'Cold-cache cost' },
   { key: 'threadCost', label: 'Thread cost' },
   { key: 'lastTurnCost', label: 'Last-turn cost' },
   { key: 'threadPercent', label: 'Thread cost %' },

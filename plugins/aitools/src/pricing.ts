@@ -62,6 +62,16 @@ function ratesFor(model: string): { rates: Rates | null; isEstimate: boolean } {
   return { rates: family?.[1] ?? null, isEstimate: true }
 }
 
+/**
+ * What a cold cache costs the next request: `tokens` of context written afresh at the 1-hour write rate, as cache-tax
+ * prices it (a warm one reads them at the cache-read rate). Null for a model with no known rates.
+ */
+export function coldCacheUsd(model: string, tokens: number): { usd: number; isEstimate: boolean } | null {
+  const { rates, isEstimate } = ratesFor(model)
+
+  return rates === null ? null : { usd: (tokens * rates.cacheWrite1h) / 1_000_000, isEstimate }
+}
+
 export function price(model: string, usage: TokenUsage): { usd: number; isEstimate: boolean } {
   const input = usage.input_tokens ?? 0
   const output = usage.output_tokens ?? 0

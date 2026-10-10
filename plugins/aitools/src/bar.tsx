@@ -1,6 +1,7 @@
 import type { Elements } from 'claude-code'
 
 import { clockTime, duration, tokens, usd, weeklyReset } from './format'
+import { coldCacheUsd } from './pricing'
 import { usdSince } from './transcripts'
 import { DOING_TEXT, VIEW_NAMES } from './checklist'
 import type { renderChecklist } from './checklist'
@@ -14,6 +15,8 @@ export type View = {
   projection: number | null
   /** Start of the last main-thread model request, or null before one. */
   cacheAt: number | null
+  /** The main chat's model, or null before its first request. */
+  model: string | null
   settings: Settings
   now: number
 }
@@ -30,6 +33,9 @@ export const LABEL = 'AI Tools'
 /** Claude Code writes the main conversation's prompt cache with the 1-hour TTL; each request restarts it. */
 export const CACHE_TTL = 60 * 60_000
 
+/** The bar's marker while /keepwarm runs: a sun with rays (U+263C), which has no color-emoji form. */
+export const KEEPWARM_MARK = '\u263C'
+
 const DASH = '—'
 const MIN = 60_000
 const CACHE_WARN = 10 * MIN
@@ -45,13 +51,31 @@ export function toneFor(pct: number | undefined, settings: Settings): Tone {
   return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : undefined
 }
 
-function cacheSegment(cacheAt: number | null, now: number, settings: Settings): Segment {
+/** What a cold cache costs the next request over a warm one, priced at the chat's model; null while unknown. */
+function coldCost(view: View): string | null {
+  const tokens = view.snapshot?.context?.tokens
+  const cost = tokens === undefined || view.model === null ? null : coldCacheUsd(view.model, tokens)
+
+  return cost === null ? null : usd(cost.usd, cost.isEstimate)
+}
+
+/**
+ * The cache segment: how long the cache stays warm, then (with Cold-cache cost on) what letting it lapse costs:
+ * `cache 42m, $0.50`, `cache cold, $0.50`. Cold-cache cost alone reads `cache $0.50`.
+ */
+function cacheSegment(view: View): Segment | null {
+  const { cacheAt, now, settings } = view
+  const cold = settings.coldCost ? coldCost(view) : null
+  if (!settings.cacheWarmth) {
+    return cold === null ? null : { key: 'cache', label: 'cache', text: `cache ${cold}` }
+  }
   if (cacheAt === null) {
-    return { key: 'cache', label: 'cache', text: `cache ${DASH}` }
+    return { key: 'cache', label: 'cache', text: `cache ${DASH}${cold === null ? '' : `, ${cold}`}` }
   }
   const left = cacheAt + CACHE_TTL - now
   const tone: Tone = !settings.thresholdColors ? undefined : left <= 0 ? 'danger' : left < CACHE_WARN ? 'warn' : undefined
-  const text = left <= 0 ? 'cache cold' : `cache ${Math.max(1, Math.ceil(left / MIN))}m`
+  const warmth = left <= 0 ? 'cache cold' : `cache ${Math.max(1, Math.ceil(left / MIN))}m`
+  const text = cold === null ? warmth : `${warmth}, ${cold}`
 
   return { key: 'cache', label: 'cache', text, tone }
 }
@@ -157,8 +181,9 @@ export function segments(view: View): Segment[] {
   if (on.threadTokens || on.lastTurnTokens) {
     segs.push(tokenSegment(snapshot, on))
   }
-  if (on.cacheWarmth) {
-    segs.push(cacheSegment(view.cacheAt, now, on))
+  const cacheSeg = cacheSegment(view)
+  if (cacheSeg !== null) {
+    segs.push(cacheSeg)
   }
   const threadSeg = threadSegment(view)
   if (threadSeg !== null) {
@@ -183,8 +208,8 @@ const VIEWS = [
   { mode: 'clean', label: VIEW_NAMES.clean },
 ] as const
 
-/** How many display options the ⁝ menu puts on one row. */
-const SETTINGS_PER_ROW = 5
+/** How many display options the ⁝ menu puts on one row: sixteen shared options make four even rows. */
+const SETTINGS_PER_ROW = 4
 
 /** Quiet buttons, matching the other bands: dim text and no outline at rest, full strength under the pointer. */
 const QUIET = { plain: true, dimColor: true } as const
@@ -211,6 +236,8 @@ export function renderBar(
     isSettingsOpen: boolean
     /** Whether Claude's last reply asks something it never put to the person as pop-up choices. */
     isAskable: boolean
+    /** Whether /keepwarm is keeping the cache warm: the bar shows its marker. */
+    isKeepingWarm: boolean
     viewMode: ViewMode
     /** The mascot's drawing as it stands now. */
     mascot: { source: string; alt: string } | null
@@ -265,6 +292,12 @@ export function renderBar(
       </Box>
       <Box flexDirection="row" gap={gap} flexShrink={0}>
         {flags.isAskable && <Button key="askme" label="?" {...QUIET} onPress={() => on.askme()} />}
+        {flags.isKeepingWarm && (
+          // On the desktop, room from ? only: the tools button's own chrome parts it from the mark.
+          <Box key="keepwarm" paddingLeft={Svg ? 1 : 0}>
+            <Text color={VALUE_COLOR}>{KEEPWARM_MARK}</Text>
+          </Box>
+        )}
         <Button key="tools" label={labels.tools} {...QUIET} onPress={() => on.toggleTools()} />
         <Button key="settings" label={labels.settings} {...QUIET} onPress={() => on.toggleSettings()} />
       </Box>

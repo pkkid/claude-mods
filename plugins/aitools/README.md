@@ -4,7 +4,7 @@ A one-row bar above the prompt showing how close your Claude subscription is to 
 cost at Anthropic API list prices.
 
 ```
-AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k)    cache 42m    thread $3.12 (+$0.41)    month $184.20    limit ~3:40pm   [🛠] [⁝]
+AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k)    cache 42m, $0.50    thread $3.12 (+$0.41)    month $184.20    limit ~3:40pm   [🛠] [⁝]
 ```
 
 | Segment | Meaning |
@@ -16,6 +16,7 @@ AI Tools    5h 42%, 1h12m    wk 18%, Thu    ctx 31% 62k/200k    tok 1.3M (+48k) 
 | `ctx 31% 62k/200k` | Context window fill: percent and tokens used / window size |
 | `tok 1.3M (+48k)` | Tokens: this thread's total this month (its helpers' included) and the last turn's, counting input, output and prompt-cache reads and writes |
 | `cache 42m` | How long the prompt cache should stay warm: Claude Code writes the main conversation's cache with a 1-hour TTL, restarted by every request. Amber under 10 minutes, `cache cold` once expired. An estimate from request times; the API does not report cache state, and Anthropic may evict early |
+| `cache 42m, $0.50` | What a cold cache costs the next message: the whole context written to the cache again at the model's 1-hour cache-write price (list prices, `~` for a model priced by its family), where a warm cache reads it for a small fraction of that. Shown after the cache time (`cache 42m, $0.50`, or `cache cold, $0.50` once it has lapsed), or as `cache $0.50` with cache warmth off. It's an upper bound: the context figure includes the last reply |
 | `thread $3.12` | This session's cost at API prices |
 | `(+$0.41)` | What the last turn cost (`last $0.41` when thread cost is hidden) |
 | `~2.1% wk (+0.03%)` | Thread cost %: the thread's and the last turn's estimated share of your weekly allowance (see below) |
@@ -32,13 +33,13 @@ sessions. `/handoff` works either way.
 
 ## Settings
 
-Press **⁝** to open the options above the bar, five to a row, and toggle any of: (in the desktop Code tab only,
+Press **⁝** to open the options above the bar, four to a row, and toggle any of: (in the desktop Code tab only,
 leading the first row) the mascot, the title, 5-hour usage,
-weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, thread cost,
-last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
+weekly usage, reset countdowns, context %, context tokens, thread tokens, last-turn tokens, cache warmth, cold-cache cost,
+thread cost, last-turn cost, thread cost %, monthly cost, burn-rate projection, threshold colors. The **🛠** button always shows.
 Changes show in the bar right away and are saved across sessions. An option that is off does no work in the
 background: the transcript scan runs only for monthly cost, thread tokens or thread cost %; the cost lookups only for
-the cost options; the cache timer only for cache warmth; the mascot follows nothing while hidden. Turned back on, an
+the cost options; the mascot follows nothing while hidden. (Request times are kept either way: `/keepwarm` needs them.) Turned back on, an
 option catches up at once, except the burn-rate projection, which needs fresh samples (a few responses) to project
 from. Hiding the bar with `/aitools off` stops all of it. Press **⁝** again to close it; opening it closes the
 **🛠** menu, and the other way round.
@@ -73,6 +74,38 @@ The **🛠** button opens a row above the bar with **Handoff**, **Notes**, **Sub
 and **Clean View**, right-aligned; press it again to close the row without picking. **Handoff** writes the same brief into a **Handoff brief** pane, drawn as formatted text with
 a **Copy** button; nothing is copied until you press it, and the brief stays out of the chat (so the current session's
 model does not read it).
+
+## Keep the cache warm
+
+Stepping away for longer than an hour lets the prompt cache lapse, and the next message pays to write the whole
+context again (the dollar figure after the cache time on the bar). `/keepwarm` holds it warm while you are gone: 5 minutes before the
+cache's hour is up, it sends one small request over the conversation, which reads the cache and restarts its hour.
+
+```
+/keepwarm             keep warm for 6 hours
+/keepwarm 90m         for a time of your own (also 2h30m, 10h)
+/keepwarm status      time left, the next ping, and what the last ping read and cost
+/keepwarm off         stop
+/keepwarm help        these lines
+```
+
+While it runs, a ☼ shows left of **🛠** (`tools` in the terminal), right of **?** when that shows.
+
+- A ping is `$.model.fork`: the conversation exactly as Claude last sent it, plus "Reply with the single word: warm".
+  It reads the cached context (about $0.01 for 62k tokens on Opus 5.5), and nothing joins the conversation.
+- No ping while Claude is working (its own requests keep the cache warm), before the session's first request, after
+  compaction until the next request, or when the cache would stay warm past the window's end anyway.
+- A cache that has already lapsed is never pinged: that would pay the full write every hour. Pings start again after
+  your next message.
+- Each ping's readback is checked. If it read nothing, or wrote a tenth of what it read or more, the cache was already
+  gone, and keepwarm stops. A failed ping (an API error, an interruption, an empty reply) stops it too. Either way a
+  dim line in the chat and `/keepwarm status` say why.
+- The window belongs to this session and is kept across a restart of it, until its time is up.
+- Claude Code must be left running, and the main cache must have the 1-hour lifetime: subscription use has it by
+  default; API-key and cloud-provider sessions need `promptCacheTtl` set to `"1h"`.
+
+The logic follows [cache-tax](https://github.com/karanb192/cache-tax)'s keepwarm, pinging 5 minutes before the hour
+where cache-tax pings after 50 idle minutes.
 
 ## Ask as choices
 

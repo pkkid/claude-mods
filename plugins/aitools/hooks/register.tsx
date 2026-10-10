@@ -26,7 +26,8 @@ import {
   reportProgress,
   workflowName,
 } from '../src/agentdock'
-import { renderBar } from '../src/bar'
+import { CACHE_TTL, renderBar } from '../src/bar'
+import { price } from '../src/pricing'
 import {
   CHECKLIST_SPEC,
   CHECKLIST_TOOL_ID,
@@ -44,6 +45,17 @@ import { EMPTY_BURN, addSample, project } from '../src/burnrate'
 import type { BurnState } from '../src/burnrate'
 import { HANDOFF_PROMPT, handoffOutput, paneMarkdown } from '../src/handoff'
 import { ASK_TOOL, askmeText, asksQuestions, isAskableIn } from '../src/askme'
+import {
+  KEEPWARM_HELP,
+  KEEPWARM_LEAD_MS,
+  KEEPWARM_PROMPT,
+  coldPingText,
+  failureText,
+  isWarmReadback,
+  keepWarmStatus,
+  parseKeepWarm,
+  pingDelay,
+} from '../src/keepwarm'
 import {
   MASCOT_START,
   ONE_SHOT_MS,
@@ -115,6 +127,9 @@ const mascot = atom({ plugin: 'aitools', key: 'mascot' } as const, MASCOT_START)
 const asking = atom({ plugin: 'aitools', key: 'asking' } as const, 0)
 const isQuestionOpen = atom({ plugin: 'aitools', key: 'isQuestionOpen' } as const, false)
 const isAskable = atom({ plugin: 'aitools', key: 'isAskable' } as const, false)
+const mainModel = atom({ plugin: 'aitools', key: 'mainModel' } as const, null)
+const keepWarm = atom({ plugin: 'aitools', key: 'keepWarm' } as const, null)
+const keepWarmStopped = atom({ plugin: 'aitools', key: 'keepWarmStopped' } as const, null)
 const isNotesOpen = atom({ plugin: 'aitools', key: 'isNotesOpen' } as const, false)
 const notes = atom({ plugin: 'aitools', key: 'notes' } as const, null)
 const isWorktreesOpen = atom({ plugin: 'aitools', key: 'isWorktreesOpen' } as const, false)
@@ -158,6 +173,8 @@ let readsInFlight = 0
 let isTurnRunning = false
 /** Whether Claude has opened the question pop-up since the person's last prompt: then the bar offers no ? button. */
 let isAskedThisRequest = false
+/** /keepwarm's one pending timer: its next ping, or its end when no ping is due before then. */
+let keepWarmTimer: Timer | null = null
 /** The once-a-second timer that redraws helper times: running only while the Subagents pane is open. */
 let dockTimer: Timer | null = null
 /** The model tools registered so far: each is offered to the model only once its feature is first turned on. */
@@ -464,10 +481,6 @@ async function catchUp($: EngineInterface, key?: ToggleKey): Promise<void> {
     if (cost !== undefined) {
       await update($, snapshot, snap => ({ ...(snap ?? {}), threadUsd: cost }))
     }
-  }
-  if (key === 'cacheWarmth') {
-    // Its time was not kept while it was off: unknown until the next request.
-    await update($, cacheAt, () => null)
   }
   if ((key === undefined || key === 'mascot') && (await isMascotOn($))) {
     await syncMascot($)
@@ -846,6 +859,124 @@ function drawMascot(state: MascotState): ReturnType<typeof mascotDrawing> {
   return lastMascot.drawing
 }
 
+/** Where a session's /keepwarm window is kept, so a restart of the session picks it up again. */
+const keepWarmKey = (sessionId: string) => `keepWarm:${sessionId}`
+
+/**
+ * Sets /keepwarm's one timer: its next ping, KEEPWARM_LEAD_MS before the cache lapses, or, with no ping due (no request
+ * yet, the cache already cold, or warm past the window), the window's end. Run again after every main turn and ping.
+ */
+async function armKeepWarm($: EngineInterface): Promise<void> {
+  keepWarmTimer?.cancel()
+  keepWarmTimer = null
+  const kw = await read($, keepWarm)
+  if (kw === null) {
+    return
+  }
+  const now = await $.clock.now()
+  if (now >= kw.until) {
+    await stopKeepWarm($, null)
+    return
+  }
+  const delay = pingDelay(now, await read($, cacheAt), kw.until)
+  keepWarmTimer =
+    delay === null
+      ? $.clock.after(kw.until - now, () => void armKeepWarm($))
+      : $.clock.after(delay, () => void pingCache($))
+}
+
+/** Ends /keepwarm: on time or turned off (`why` null), or early, with the reason /keepwarm status gives. */
+async function stopKeepWarm($: EngineInterface, why: string | null): Promise<void> {
+  keepWarmTimer?.cancel()
+  keepWarmTimer = null
+  await update($, keepWarm, () => null)
+  await update($, keepWarmStopped, () => why)
+  await $.store.delete(keepWarmKey(await $.session.id())).catch(() => undefined)
+  if (why !== null) {
+    $.ui.log(`aitools: keepwarm stopped: ${why}`)
+  }
+}
+
+/**
+ * One keepwarm ping: a request over the conversation as the main thread last sent it (`$.model.fork`), which the API
+ * serves from the cache, restarting its hour. Its readback must show a read of the prefix; anything else stops the
+ * window, since the cache is gone and pinging on would pay a write every hour.
+ */
+async function pingCache($: EngineInterface): Promise<void> {
+  keepWarmTimer = null
+  const kw = await read($, keepWarm)
+  const at = await read($, cacheAt)
+  const now = await $.clock.now()
+  // A turn's own requests keep the cache warm, and its end sets the timer again; a request since the timer was set
+  // has moved the ping later.
+  if (kw === null || isTurnRunning || at === null || now < at + CACHE_TTL - KEEPWARM_LEAD_MS - 1000) {
+    if (!isTurnRunning) await armKeepWarm($)
+    return
+  }
+  if (now >= kw.until || now >= at + CACHE_TTL) {
+    await armKeepWarm($)
+    return
+  }
+  let reply: Awaited<ReturnType<EngineInterface['model']['fork']>>
+  try {
+    reply = await $.model.fork({ prompt: KEEPWARM_PROMPT })
+  } catch (err) {
+    await stopKeepWarm($, `the ping failed: ${errorText(err)}`)
+    return
+  }
+  if (!reply.isAnswered) {
+    await stopKeepWarm($, failureText(reply.reason, 'status' in reply ? reply.status : null))
+    return
+  }
+  if (!isWarmReadback(reply.usage)) {
+    await stopKeepWarm($, coldPingText(reply.usage))
+    return
+  }
+  const model = await read($, mainModel)
+  const cost = model === null ? null : price(model, reply.usage)
+  const pinged = await $.clock.now()
+  const receipt = { at: pinged, read: reply.usage.cache_read_input_tokens, usd: cost?.usd ?? null, isEstimate: cost?.isEstimate ?? false }
+  await update($, cacheAt, () => pinged)
+  await rememberCacheAt($, pinged).catch(() => undefined)
+  await update($, keepWarm, k => (k === null ? k : { ...k, lastPing: receipt }))
+  await armKeepWarm($)
+}
+
+/** `/keepwarm [6h|90m|off|status]`: starts (6 hours bare), ends or reports keeping the cache warm. */
+async function keepWarmCommand($: EngineInterface, args: string): Promise<{ text: string }> {
+  const asked = parseKeepWarm(args)
+  if (asked === null || asked.kind === 'help') {
+    return { text: KEEPWARM_HELP }
+  }
+  if (asked.kind === 'stop') {
+    const wasOn = (await read($, keepWarm)) !== null
+    await stopKeepWarm($, null)
+    return { text: wasOn ? 'Keepwarm stopped: the cache lapses an hour after the last request.' : 'Keepwarm is already off.' }
+  }
+  // One reading of the clock, so `/keepwarm 5h` reports 5h0m, not the 4h59m a later reading would floor to.
+  const now = await $.clock.now()
+  if (asked.kind === 'start') {
+    const until = now + asked.ms
+    await update($, keepWarm, () => ({ until, lastPing: null }))
+    await update($, keepWarmStopped, () => null)
+    await $.store.set(keepWarmKey(await $.session.id()), until)
+    await armKeepWarm($)
+  }
+
+  return { text: keepWarmStatus(await read($, keepWarm), await read($, keepWarmStopped), await read($, cacheAt), now) }
+}
+
+/** On load: a window this session saved (before a restart) comes back, and the timer is set again either way. */
+async function restoreKeepWarm($: EngineInterface): Promise<void> {
+  if ((await read($, keepWarm)) === null) {
+    const saved = await $.store.get(keepWarmKey(await $.session.id()))
+    if (typeof saved === 'number' && saved > (await $.clock.now())) {
+      await update($, keepWarm, () => ({ until: saved, lastPing: null }))
+    }
+  }
+  await armKeepWarm($)
+}
+
 /**
  * The bar's ? button: /askme's prompt sent as the person's, or, while a turn runs or when the prompt cannot be sent,
  * `/askme` put in the prompt box ahead of any draft (which then rides along as its note) to send by hand. When the box
@@ -876,6 +1007,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     month: await read($, month),
     projection: await read($, projection),
     cacheAt: await read($, cacheAt),
+    model: await read($, mainModel),
     settings: current,
     now: await $.clock.now(),
   }
@@ -885,6 +1017,7 @@ async function drawBar($: EngineInterface, el: Parameters<typeof renderBar>[0], 
     isToolsOpen: await read($, isToolsOpen),
     isSettingsOpen: await read($, isSettingsOpen),
     isAskable: await read($, isAskable),
+    isKeepingWarm: (await read($, keepWarm)) !== null,
     viewMode: await read($, viewMode),
     // Read only where it is drawn and turned on, so no other bar redraws for the mascot.
     mascot: el.Svg && current.mascot ? drawMascot(await read($, mascot)) : null,
@@ -1219,9 +1352,14 @@ export const register: Register = on => {
     }
     const hidden = (await $.store.get('isHidden')) === true
     await update($, isHidden, () => hidden)
-    if (await isShown($, 'cacheWarmth')) {
-      await restoreCacheAt($)
+    await restoreCacheAt($)
+    // The chat's model, before its first request here (a resumed session): what a cold cache is priced at.
+    if ((await read($, mainModel)) === null) {
+      const model = await $.session.model().catch(() => null)
+      if (model) await update($, mainModel, () => model)
     }
+    // A reload keeps /keepwarm's window in $.state, a restart in $.store; its timer went with the old module.
+    await restoreKeepWarm($)
     // The tick redraws countdowns while the bar shows, and checks whether the mascot has stood idle long enough to
     // fall asleep.
     $.clock.every(TICK_MS, () => void onTick($))
@@ -1283,6 +1421,7 @@ export const register: Register = on => {
       await setWorktreesOpen($, true)
     }
     await $.command.register({ name: 'handoff', description: 'Print a handoff brief for a fresh session and copy it' })
+    await $.command.register({ name: 'keepwarm', description: 'Keep the prompt cache warm while you are away (6h bare)', argumentHint: '[6h|90m|off|status|help]' })
     await $.command.register({
       name: 'askme',
       description: 'Ask the questions from the last answer as pop-up choices with a recommendation',
@@ -1317,12 +1456,14 @@ export const register: Register = on => {
 
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
-      if (await isShown($, 'cacheWarmth')) {
-        const at = await $.clock.now()
-        await update($, cacheAt, () => at)
-        // Persisting is a nicety (survives reloads); it must never hold up the model request.
-        await rememberCacheAt($, at).catch(() => undefined)
+      if ((await read($, mainModel)) !== e.model) {
+        await update($, mainModel, () => e.model)
       }
+      // Kept whether the cache meter shows or not: /keepwarm times its pings from it.
+      const at = await $.clock.now()
+      await update($, cacheAt, () => at)
+      // Persisting is a nicety (survives reloads); it must never hold up the model request.
+      await rememberCacheAt($, at).catch(() => undefined)
       // The chat's effort is what Same as chat helpers run at: kept while a team is picked.
       if (await isTeamPicked($)) {
         await update($, mainEffort, () => e.effort ?? null)
@@ -1362,6 +1503,11 @@ export const register: Register = on => {
       return next(e)
     }
     isTurnRunning = false
+    if (e.usage?.model && (await read($, mainModel)) !== e.usage.model) {
+      const model = e.usage.model
+      await update($, mainModel, () => model)
+    }
+    await armKeepWarm($)
     const isAsking = e.reason === 'answer' && !isAskedThisRequest && asksQuestions(e.answer)
     await update($, isAskable, () => isAsking)
     if ((await read($, viewMode)) === 'clean') {
@@ -1411,6 +1557,20 @@ export const register: Register = on => {
 
   on('command.run', { command: 'taskview' }, ($, e) => viewCommand($, 'task', e.args))
   on('command.run', { command: 'cleanview' }, ($, e) => viewCommand($, 'clean', e.args))
+
+  on('command.run', { command: 'keepwarm' }, ($, e) => keepWarmCommand($, e.args))
+
+  // Compaction replaces the conversation the cache held: its warmth is unknown until the next request, and keepwarm
+  // waits for that, as cache-tax does.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined) {
+      await update($, cacheAt, () => null)
+      await armKeepWarm($)
+    }
+
+    return result
+  })
 
   // The brief is the command's output row: the chat renders it as markdown.
   on('command.run', { command: 'handoff' }, async $ => ({ text: await handoff($) }))

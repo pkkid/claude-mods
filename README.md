@@ -24,6 +24,7 @@ The bar reads left to right. Labels are dim, values brighter; usage and context 
 | `ctx 31% 62k/200k` | How full this conversation's memory (context window) is |
 | `tok 1.3M (+48k)` | Tokens this conversation has used this month, and in the last turn |
 | `cache 42m` | How long Claude's prompt cache stays warm (a cold cache makes the next message cost more) |
+| `cache 42m, $0.50` | After the cache time: what the next message would cost if the cache went cold, the whole context written to the cache again |
 | `thread $3.12 (+$0.41)` | What this conversation, and its last turn, would cost at API prices |
 | `~2.1% wk` | Roughly how much of your weekly allowance this conversation has taken |
 | `month $184.20` | All your Claude Code use this month on this computer, at API prices |
@@ -91,6 +92,7 @@ next step. Copy it and paste it into a new session to pick up where you left off
 |---|---|
 | `/aitools` | Hide or show the whole bar (`/aitools on`, `/aitools off`) |
 | `/handoff` | Write a handoff brief into the chat and copy it |
+| `/keepwarm` | Keep the prompt cache warm while you're away: `/keepwarm` for 6 hours, `/keepwarm 90m`, `/keepwarm off`. A ☼ shows on the bar while it runs |
 | `/askme` | Ask the questions from Claude's last answer again as pop-up choices, with a recommendation first |
 | `/taskview`, `/cleanview` | Turn Task View or Clean View on or off |
 | `/subagents` | Open or close the Subagents pane |

@@ -60,7 +60,7 @@ describe('AbovePrompt band', () => {
     }
   })
 
-  test('the display options come five to a row; Mascot leads the first row, on the desktop only', async ($, on) => {
+  test('the display options come four to a row; Mascot leads the first row, on the desktop only', async ($, on) => {
     coreBand(on)
     mock.store(on, {})
     mock.clock(on, { now: NOW })
@@ -79,7 +79,7 @@ describe('AbovePrompt band', () => {
       await ui.press({ key: 'settings' })
       await ui.unmount()
     }
-    expect(counts).toEqual({ terminal: [5, 5, 5], desktop: [6, 5, 5] })
+    expect(counts).toEqual({ terminal: [4, 4, 4, 4], desktop: [5, 4, 4, 4] })
   })
 
   test('the mascot stands at the start of the bar on the desktop only, and Mascot hides him', async ($, on) => {

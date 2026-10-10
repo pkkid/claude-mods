@@ -21,6 +21,7 @@ function view(over: Partial<View> = {}, settings: Partial<Settings> = {}): View 
     },
     month: { usd: 184.2, isEstimate: false, status: 'ready' },
     cacheAt: NOW - 18 * MIN,
+    model: null,
     projection: new Date(2026, 9, 4, 15, 40).getTime(),
     settings: { ...DEFAULT_SETTINGS, ...settings },
     now: NOW,
@@ -115,7 +116,30 @@ describe('cache warmth', () => {
     expect(cache(61)?.tone).toBe('danger')
   })
   test('no tone without threshold colors', () => expect(cache(61, { thresholdColors: false })?.tone).toBeUndefined())
-  test('hidden when off', () => expect(cache(18, { cacheWarmth: false })).toBeUndefined())
+  test('hidden when off', () => expect(cache(18, { cacheWarmth: false, coldCost: false })).toBeUndefined())
+})
+
+describe('cold-cache cost', () => {
+  // 62.4k tokens written afresh at Opus 5.5's 1-hour rate ($8/M): $0.50.
+  const cache = (minutesAgo: number | null, settings: Partial<Settings> = {}, model: string | null = 'claude-opus-5-5') =>
+    segments(view({ cacheAt: minutesAgo === null ? null : NOW - minutesAgo * MIN, model }, settings)).find(s => s.key === 'cache')?.text
+
+  test('just after the warmth, cold or not', () => {
+    expect(cache(18)).toBe('cache 42m, $0.50')
+    expect(cache(61)).toBe('cache cold, $0.50')
+    expect(cache(null)).toBe('cache —, $0.50')
+  })
+
+  test('on its own with the warmth off, and gone when its option is off', () => {
+    expect(cache(18, { cacheWarmth: false })).toBe('cache $0.50')
+    expect(cache(18, { coldCost: false })).toBe('cache 42m')
+  })
+
+  test('marked an estimate for a model priced by its family; left out before the model or context is known', () => {
+    expect(cache(18, {}, 'claude-opus-9')).toBe('cache 42m, ~$0.50')
+    expect(cache(18, {}, null)).toBe('cache 42m')
+    expect(segments(view({ model: 'claude-opus-5-5', snapshot: null })).find(s => s.key === 'cache')?.text).toBe('cache 42m')
+  })
 })
 
 describe('toneFor', () => {
