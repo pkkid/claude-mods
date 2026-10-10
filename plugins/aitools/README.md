@@ -148,7 +148,7 @@ dim (but a failed one's ×): no bar, just how long it ran and how long ago it fi
 ```
 Showing: [All] Tool agents  Current task
 Hide completed: [Never] 15m  5m  1m  Immediate
-Set team size: Default  3 [5] 10  20  30
+Set team size: Default  3 [5] 8  10  20
 Set model: [Same as chat] Fast & cheap
 
 5 agents · 3 working · 2 idle · 1 queued · 1 done
@@ -164,7 +164,7 @@ team note, no model change, nothing in the status line); each is only asked to r
 status line. While the pane is closed nothing is tracked; while it is open but not on screen (the status line then
 reads `Subagents (not shown)`) the team does not apply.
 
-- **Set team size**: how many helpers may run at once (3, 5, 10, 20 or 30). Past 10 the pane warns in yellow that a
+- **Set team size**: how many helpers may run at once (3, 5, 8, 10 or 20). Past 10 the pane warns in yellow that a
   big team uses your Claude usage much faster.
 - **Set model** (always shown; faint and unpickable on Default): **Same as chat** (the default) uses the chat's
   model and reasoning level; **Fast & cheap** runs every helper request on Sonnet 5.5 at low reasoning.

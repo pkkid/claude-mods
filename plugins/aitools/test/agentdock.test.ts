@@ -51,9 +51,10 @@ describe('agent runs', () => {
 
 describe('dock text', () => {
   test('team sizes are the five offered', () => {
-    expect([3, 5, 10, 20, 30].every(isTeamSize)).toBe(true)
+    expect([3, 5, 8, 10, 20].every(isTeamSize)).toBe(true)
     expect(isTeamSize(1)).toBe(false)
     expect(isTeamSize(4)).toBe(false)
+    expect(isTeamSize(30)).toBe(false)
     expect(isTeamSize('5')).toBe(false)
   })
 

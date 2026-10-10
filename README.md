@@ -57,7 +57,7 @@ For bigger jobs Claude can hand pieces to subagents, helpers that work at the sa
 each one with what it is doing, how far along it is and how long it has run, and Clawd gets a mini Clawd stacked on his
 head for every helper at work.
 
-The pane can also set a **team size** (3 to 30 helpers at once) and ask Claude to split work across the team, and can
+The pane can also set a **team size** (3 to 20 helpers at once) and ask Claude to split work across the team, and can
 run helpers on a faster, cheaper model. Leave it on **Default** to just watch.
 
 ![The Subagents pane](docs/images/subagents.svg)

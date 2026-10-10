@@ -50,7 +50,7 @@ export type ChecklistItem = { text: string; status: 'todo' | 'doing' | 'done'; p
 export type Checklist = { title: string; items: ChecklistItem[] }
 
 /** How many helper agents the Subagents pane lets run at once. */
-export type TeamSize = 3 | 5 | 10 | 20 | 30
+export type TeamSize = 3 | 5 | 8 | 10 | 20
 
 /** The team picked in the Subagents pane: a size, or Default, which leaves subagents as Claude Code runs them. */
 export type TeamPick = TeamSize | 'default'

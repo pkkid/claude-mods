@@ -5,7 +5,7 @@ import { BLUE, DOING_TEXT, FAINT_TEXT, progressBar } from './checklist'
 import { ago, elapsed } from './format'
 import { TOTEM_HEIGHT, TOTEM_WIDTH, totemAlt, totemSvg } from './totem'
 
-export const TEAM_SIZES = [3, 5, 10, 20, 30] as const
+export const TEAM_SIZES = [3, 5, 8, 10, 20] as const
 /** The team picks the pane offers: Default first, which changes nothing about subagents, then the sizes. */
 export const TEAM_PICKS = ['default', ...TEAM_SIZES] as const
 /** How many finished subagents the pane keeps listing, newest first out of view last. */

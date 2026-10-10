@@ -563,7 +563,7 @@ describe('wiring', () => {
       await start($, on, { usd: 0 })
       expect((await run($, 'subagents')).text).toBe('Subagents open: Default, subagents run as usual.')
       const pane = await $.ui.mount({ ...DOCK, requestId: 'subagents' })
-      expect(await picks(pane, 'team-')).toEqual(['team-default', 'team-3', 'team-5', 'team-10', 'team-20', 'team-30'])
+      expect(await picks(pane, 'team-')).toEqual(['team-default', 'team-3', 'team-5', 'team-8', 'team-10', 'team-20'])
       expect(await pick(pane, 'team-default')).toBe('[x] Default')
       // Set model shows on Default, faint and unpickable: text, not buttons.
       expect((await pane.find({ type: 'Text', text: 'Same as chat' }))?.props.color).toBe('#808080')
